@@ -1,0 +1,13 @@
+[20-Aug-2025 18:18:25 UTC] PHP Parse error:  syntax error, unexpected identifier "Exception", expecting ")" in /home/aurioni1/public_html/config.php on line 22
+[20-Aug-2025 18:22:16 UTC] PHP Parse error:  syntax error, unexpected identifier "Exception", expecting ")" in /home/aurioni1/public_html/config.php on line 22
+[20-Aug-2025 18:22:36 UTC] PHP Parse error:  syntax error, unexpected identifier "Exception", expecting ")" in /home/aurioni1/public_html/config.php on line 22
+[20-Aug-2025 18:22:37 UTC] PHP Parse error:  syntax error, unexpected identifier "Exception", expecting ")" in /home/aurioni1/public_html/config.php on line 22
+[20-Aug-2025 18:23:52 UTC] PHP Parse error:  syntax error, unexpected identifier "Exception", expecting ")" in /home/aurioni1/public_html/config.php on line 22
+[20-Aug-2025 18:23:52 UTC] PHP Parse error:  syntax error, unexpected identifier "Exception", expecting ")" in /home/aurioni1/public_html/config.php on line 22
+[20-Aug-2025 18:23:53 UTC] PHP Parse error:  syntax error, unexpected identifier "Exception", expecting ")" in /home/aurioni1/public_html/config.php on line 22
+[20-Aug-2025 18:33:08 UTC] PHP Warning:  require_once(../config.php): Failed to open stream: No such file or directory in /home/aurioni1/public_html/admin/login.php on line 8
+[20-Aug-2025 18:33:08 UTC] PHP Fatal error:  Uncaught Error: Failed opening required '../config.php' (include_path='.:/opt/alt/php84/usr/share/pear:/opt/alt/php84/usr/share/php:/usr/share/pear:/usr/share/php') in /home/aurioni1/public_html/admin/login.php:8
+Stack trace:
+#0 /home/aurioni1/public_html/pages-debug.php(141): include()
+#1 {main}
+  thrown in /home/aurioni1/public_html/admin/login.php on line 8

@@ -1,6 +1,6 @@
 <?php
 /**
- * AURIONIX MAIN HOMEPAGE
+ * AURIONIX MAIN HOMEPAGE - FIXED
  * Place in root directory (public_html/)
  */
 
@@ -25,6 +25,16 @@ $heroSubtitle = getSetting('hero_subtitle', 'The brand of choice for the next ge
 
 // Get user's country for streaming links
 $userCountry = getUserCountry();
+
+// Get social media links
+$socialLinks = [
+    'spotify' => getSetting('social_spotify', ''),
+    'youtube' => getSetting('social_youtube', ''),
+    'soundcloud' => getSetting('social_soundcloud', ''),
+    'instagram' => getSetting('social_instagram', ''),
+    'twitter' => getSetting('social_twitter', ''),
+    'facebook' => getSetting('social_facebook', '')
+];
 ?>
 
 <!DOCTYPE html>
@@ -62,20 +72,38 @@ $userCountry = getUserCountry();
             
             <div class="nav-menu">
                 <a href="#home" class="nav-link active">Home</a>
-                <a href="#albums" class="nav-link">Albums</a>
-                <a href="#about" class="nav-link">About</a>
-                <a href="#contact" class="nav-link">Contact</a>
+                <a href="#albums" class="nav-link">Music</a>
+                <a href="/about.php" class="nav-link">About</a>
+                <a href="/contact.php" class="nav-link">Contact</a>
             </div>
             
             <div class="nav-actions">
+                <!-- Search Box - Now functional -->
                 <div class="search-box">
-                    <input type="text" placeholder="Search tracks..." id="searchInput">
-                    <button class="search-btn">🔍</button>
+                    <input type="text" placeholder="Search music..." id="searchInput">
+                    <button class="search-btn" id="searchBtn">🔍</button>
                 </div>
+                
+                <!-- Social Media Links -->
                 <div class="nav-icons">
-                    <a href="#" class="nav-icon">❤️</a>
-                    <a href="#" class="nav-icon">🛒</a>
-                    <a href="#" class="nav-icon">👤</a>
+                    <?php if($socialLinks['spotify']): ?>
+                        <a href="<?= htmlspecialchars($socialLinks['spotify']) ?>" target="_blank" class="nav-icon" title="Listen on Spotify">🎵</a>
+                    <?php endif; ?>
+                    
+                    <?php if($socialLinks['youtube']): ?>
+                        <a href="<?= htmlspecialchars($socialLinks['youtube']) ?>" target="_blank" class="nav-icon" title="YouTube Channel">📺</a>
+                    <?php endif; ?>
+                    
+                    <?php if($socialLinks['soundcloud']): ?>
+                        <a href="<?= htmlspecialchars($socialLinks['soundcloud']) ?>" target="_blank" class="nav-icon" title="SoundCloud">☁️</a>
+                    <?php endif; ?>
+                    
+                    <?php if($socialLinks['instagram']): ?>
+                        <a href="<?= htmlspecialchars($socialLinks['instagram']) ?>" target="_blank" class="nav-icon" title="Instagram">📷</a>
+                    <?php endif; ?>
+                    
+                    <!-- Admin access (hidden) -->
+                    <a href="admin/dashboard.php" class="nav-icon admin-link" title="Admin Dashboard" style="opacity: 0.3;">⚙️</a>
                 </div>
             </div>
             
@@ -104,28 +132,49 @@ $userCountry = getUserCountry();
                 <p class="hero-subtitle"><?= htmlspecialchars($heroSubtitle) ?></p>
                 
                 <div class="hero-buttons">
-                    <button class="btn btn-primary">Learn more</button>
-                    <button class="btn btn-secondary">▶ Watch Video</button>
+                    <?php if($socialLinks['spotify']): ?>
+                        <a href="<?= htmlspecialchars($socialLinks['spotify']) ?>" target="_blank" class="btn btn-primary">Listen on Spotify</a>
+                    <?php endif; ?>
+                    
+                    <?php if($socialLinks['youtube']): ?>
+                        <a href="<?= htmlspecialchars($socialLinks['youtube']) ?>" target="_blank" class="btn btn-secondary">▶ Watch Videos</a>
+                    <?php endif; ?>
+                    
+                    <?php if(!$socialLinks['spotify'] && !$socialLinks['youtube']): ?>
+                        <a href="#albums" class="btn btn-primary">🎵 Explore Music</a>
+                        <button class="btn btn-secondary" onclick="scrollToContact()">📧 Get in Touch</button>
+                    <?php endif; ?>
+                </div>
+                
+                <!-- Social Media Bar -->
+                <div class="social-links">
+                    <?php foreach($socialLinks as $platform => $url): ?>
+                        <?php if($url): ?>
+                            <a href="<?= htmlspecialchars($url) ?>" target="_blank" class="social-link" title="<?= ucfirst($platform) ?>">
+                                <?= getSocialIcon($platform) ?>
+                            </a>
+                        <?php endif; ?>
+                    <?php endforeach; ?>
                 </div>
             </div>
             
             <div class="hero-right">
                 <div class="top-charts-widget">
                     <div class="widget-header">
-                        <h3>TOP CHARTS</h3>
-                        <select class="chart-filter">
-                            <option>All Charts</option>
-                            <option>Electronic</option>
-                            <option>Hip Hop</option>
+                        <h3>LATEST RELEASES</h3>
+                        <select class="chart-filter" id="releaseFilter">
+                            <option>All Releases</option>
+                            <option>Featured</option>
+                            <option>Latest</option>
                         </select>
                     </div>
                     
                     <div class="chart-list">
                         <?php foreach (array_slice($featuredAlbums, 0, 4) as $index => $album): ?>
-                        <div class="chart-item">
+                        <div class="chart-item" data-album-id="<?= $album['id'] ?>">
                             <div class="chart-position"><?= $index + 1 ?></div>
                             <div class="chart-cover">
-                                <img src="<?= $album['cover_image'] ?: '/assets/default-cover.jpg' ?>" 
+                                <img src="<?= $album['cover_image'] ? '/' . $album['cover_image'] : '/assets/default-cover.jpg' ?>" 
                                      alt="<?= htmlspecialchars($album['title']) ?>">
                                 <div class="play-overlay">▶</div>
                             </div>
@@ -134,8 +183,7 @@ $userCountry = getUserCountry();
                                 <p><?= htmlspecialchars($artistName) ?></p>
                             </div>
                             <div class="chart-actions">
-                                <span class="chart-plays">💖 <?= rand(100, 999) ?></span>
-                                <span class="chart-shares">📤 <?= rand(10, 99) ?></span>
+                                <span class="chart-date"><?= date('M Y', strtotime($album['release_date'])) ?></span>
                             </div>
                         </div>
                         <?php endforeach; ?>
@@ -144,93 +192,99 @@ $userCountry = getUserCountry();
             </div>
         </div>
         
-        <!-- Currently Playing Bar -->
-        <div class="now-playing">
+        <!-- Currently Playing Bar - Hidden by default -->
+        <div class="now-playing" id="nowPlaying">
             <div class="now-playing-content">
                 <div class="now-playing-left">
                     <div class="np-cover">
-                        <img src="/assets/default-cover.jpg" alt="Current Track">
+                        <img src="/assets/default-cover.jpg" alt="Current Track" id="npCover">
                     </div>
                     <div class="np-info">
-                        <h4>Dear Momma</h4>
-                        <p><?= htmlspecialchars($artistName) ?></p>
+                        <h4 id="npTitle">Select a track</h4>
+                        <p id="npArtist"><?= htmlspecialchars($artistName) ?></p>
                     </div>
                     <div class="np-controls-mini">
-                        <button>❤️</button>
-                        <button>⭐</button>
-                        <button>📤</button>
+                        <!-- Removed favorites button per user request -->
+                        <button id="npShare" title="Share track">📤</button>
                     </div>
                 </div>
                 
                 <div class="now-playing-center">
                     <div class="player-controls">
-                        <button>🔀</button>
-                        <button>⏮️</button>
-                        <button class="play-main">▶️</button>
-                        <button>⏭️</button>
-                        <button>🔁</button>
+                        <button id="npPrev">⏮️</button>
+                        <button class="play-main" id="npPlayPause">▶️</button>
+                        <button id="npNext">⏭️</button>
                     </div>
                     <div class="progress-container">
-                        <span class="time-current">0:00</span>
-                        <div class="progress-bar">
-                            <div class="progress-fill"></div>
+                        <span class="time-current" id="npCurrentTime">0:00</span>
+                        <div class="progress-bar" id="npProgressBar">
+                            <div class="progress-fill" id="npProgressFill"></div>
                         </div>
-                        <span class="time-total">3:45</span>
+                        <span class="time-total" id="npTotalTime">0:00</span>
                     </div>
                 </div>
                 
                 <div class="now-playing-right">
-                    <button>📥</button>
-                    <button>📋</button>
-                    <button>🔊</button>
-                    <button>⋮</button>
+                    <button id="npDownload" title="Download/Stream">📥</button>
+                    <button id="npPlaylist" title="View all tracks">📋</button>
+                    <button id="npVolume" title="Volume">🔊</button>
+                    <button id="npClose" title="Close player">✕</button>
                 </div>
             </div>
         </div>
     </section>
 
+    <!-- About and Contact sections removed in favour of dedicated pages -->
+
     <!-- Featured Albums Section -->
     <section class="featured-section" id="albums">
         <div class="container">
             <div class="section-header">
-                <h2>PROMOTED BEATS</h2>
+                <h2>MUSIC COLLECTION</h2>
                 <div class="section-filter">
                     <select id="albumFilter">
-                        <option value="all">All Charts</option>
-                        <option value="electronic">Electronic</option>
-                        <option value="hip-hop">Hip Hop</option>
-                        <option value="ambient">Ambient</option>
+                        <option value="all">All Music</option>
+                        <option value="featured">Featured</option>
+                        <option value="latest">Latest Releases</option>
+                        <option value="popular">Most Popular</option>
                     </select>
                 </div>
             </div>
             
-            <div class="albums-grid">
+            <div class="albums-grid" id="albumsGrid">
                 <?php foreach ($allAlbums as $album): ?>
-                <div class="album-card" data-album-id="<?= $album['id'] ?>">
+                <div class="album-card" data-album-id="<?= $album['id'] ?>" data-featured="<?= $album['featured'] ? 'true' : 'false' ?>">
                     <div class="album-cover">
-                        <img src="<?= $album['cover_image'] ?: '/assets/default-cover.jpg' ?>" 
+                        <img src="<?= $album['cover_image'] ? '/' . $album['cover_image'] : '/assets/default-cover.jpg' ?>" 
                              alt="<?= htmlspecialchars($album['title']) ?>">
                         <div class="album-overlay">
-                            <button class="play-btn">▶</button>
+                            <button class="play-btn" onclick="playAlbum(<?= $album['id'] ?>)">▶</button>
                             <div class="album-actions">
-                                <button class="action-btn">❤️</button>
-                                <button class="action-btn">📤</button>
-                                <button class="action-btn">🛒</button>
+                                <!-- Removed heart/favorite button per user request -->
+                                <button class="action-btn" onclick="shareAlbum(<?= $album['id'] ?>)" title="Share">📤</button>
+                                <button class="action-btn" onclick="showTrackList(<?= $album['id'] ?>)" title="View tracks">🎼</button>
                             </div>
                         </div>
                         <div class="album-controls">
-                            <button>⏮️</button>
-                            <button class="main-play">▶️</button>
-                            <button>⏭️</button>
+                            <button onclick="previousTrack()">⏮️</button>
+                            <button class="main-play" onclick="playAlbum(<?= $album['id'] ?>)">▶️</button>
+                            <button onclick="nextTrack()">⏭️</button>
                         </div>
                     </div>
                     
                     <div class="album-info">
                         <h3><?= htmlspecialchars($album['title']) ?></h3>
                         <div class="album-meta">
-                            <span class="rating">⭐⭐⭐⭐⭐</span>
-                            <span class="price">$<?= rand(10, 50) ?></span>
+                            <span class="release-date">📅 <?= date('M j, Y', strtotime($album['release_date'])) ?></span>
+                            <?php if($album['featured']): ?>
+                                <span class="featured-badge">⭐ Featured</span>
+                            <?php endif; ?>
                         </div>
+                        
+                        <?php if($album['description']): ?>
+                            <p class="album-description"><?= htmlspecialchars(substr($album['description'], 0, 100)) ?><?= strlen($album['description']) > 100 ? '...' : '' ?></p>
+                        <?php endif; ?>
+                        
                         <div class="streaming-links">
                             <?php
                             $platforms = ['spotify', 'apple-music', 'youtube', 'soundcloud'];
@@ -241,7 +295,8 @@ $userCountry = getUserCountry();
                             <a href="<?= htmlspecialchars($link['url']) ?>" 
                                target="_blank" 
                                class="streaming-btn streaming-<?= $platform ?>"
-                               title="Listen on <?= ucfirst(str_replace('-', ' ', $platform)) ?>">
+                               title="Listen on <?= ucfirst(str_replace('-', ' ', $platform)) ?>"
+                               onclick="trackClick('<?= $platform ?>', <?= $album['id'] ?>)">
                                 <?= getIconForPlatform($platform) ?>
                             </a>
                             <?php endif; endforeach; ?>
@@ -251,8 +306,46 @@ $userCountry = getUserCountry();
                 <?php endforeach; ?>
             </div>
             
+            <?php if(empty($allAlbums)): ?>
+                <div class="empty-state">
+                    <div class="empty-icon">🎵</div>
+                    <h3>Music Coming Soon</h3>
+                    <p>New releases are on the way! Follow us on social media for updates.</p>
+                    <div class="social-links">
+                        <?php foreach($socialLinks as $platform => $url): ?>
+                            <?php if($url): ?>
+                                <a href="<?= htmlspecialchars($url) ?>" target="_blank" class="btn btn-outline">
+                                    <?= getSocialIcon($platform) ?> <?= ucfirst($platform) ?>
+                                </a>
+                            <?php endif; ?>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+            <?php endif; ?>
+            
+            <!-- Simple Footer -->
             <div class="section-footer">
-                <button class="btn btn-outline">View all</button>
+                <div style="text-align: center; margin-top: 60px; padding-top: 40px; border-top: 1px solid rgba(255,255,255,0.1);">
+                    <p style="color: rgba(255,255,255,0.6); margin-bottom: 20px;">
+                        © <?= date('Y') ?> <?= htmlspecialchars($artistName) ?>. All rights reserved.
+                    </p>
+                    
+                    <!-- Social Links Footer -->
+                    <div style="display: flex; justify-content: center; gap: 20px; margin-bottom: 20px;">
+                        <?php foreach($socialLinks as $platform => $url): ?>
+                            <?php if($url): ?>
+                                <a href="<?= htmlspecialchars($url) ?>" target="_blank" style="color: rgba(255,255,255,0.6); text-decoration: none; transition: color 0.3s ease;" 
+                                   onmouseover="this.style.color='#e94560'" onmouseout="this.style.color='rgba(255,255,255,0.6)'">
+                                    <?= getSocialIcon($platform) ?> <?= ucfirst($platform) ?>
+                                </a>
+                            <?php endif; ?>
+                        <?php endforeach; ?>
+                    </div>
+                    
+                    <p style="color: rgba(255,255,255,0.4); font-size: 0.9rem;">
+                        🎵 Made with passion for music lovers everywhere
+                    </p>
+                </div>
             </div>
         </div>
     </section>
@@ -262,7 +355,7 @@ $userCountry = getUserCountry();
         <div class="player-content">
             <div class="player-header">
                 <h3>Now Playing</h3>
-                <button class="close-player">&times;</button>
+                <button class="close-player" onclick="closePlayer()">&times;</button>
             </div>
             
             <div class="player-main">
@@ -276,33 +369,21 @@ $userCountry = getUserCountry();
                 </div>
                 
                 <div class="player-controls-full">
-                    <button id="shuffleBtn">🔀</button>
-                    <button id="prevBtn">⏮️</button>
-                    <button id="playPauseBtn" class="play-pause-main">▶️</button>
-                    <button id="nextBtn">⏭️</button>
-                    <button id="repeatBtn">🔁</button>
-                </div>
-                
-                <div class="player-progress">
-                    <span id="currentTime">0:00</span>
-                    <div class="progress-container">
-                        <div class="progress-track">
-                            <div class="progress-fill"></div>
-                        </div>
-                    </div>
-                    <span id="totalTime">0:00</span>
-                </div>
-                
-                <div class="player-volume">
-                    <button>🔊</button>
-                    <div class="volume-slider">
-                        <input type="range" min="0" max="100" value="50">
-                    </div>
+                    <button onclick="previousTrack()">⏮️</button>
+                    <button id="mainPlayPause" class="play-pause-main">▶️</button>
+                    <button onclick="nextTrack()">⏭️</button>
                 </div>
             </div>
             
             <div class="embed-container" id="embedContainer">
                 <!-- Spotify/YouTube embeds will load here -->
+            </div>
+            
+            <div class="streaming-options" id="streamingOptions">
+                <h4>Listen on your favorite platform:</h4>
+                <div class="platform-links" id="platformLinks">
+                    <!-- Platform links will be populated here -->
+                </div>
             </div>
         </div>
     </div>
@@ -315,8 +396,185 @@ $userCountry = getUserCountry();
         window.SITE_CONFIG = {
             userCountry: '<?= $userCountry ?>',
             artistName: '<?= htmlspecialchars($artistName) ?>',
-            siteUrl: '<?= SITE_URL ?>'
+            siteUrl: '<?= SITE_URL ?>',
+            socialLinks: <?= json_encode($socialLinks) ?>
         };
+
+        // Enhanced search functionality
+        document.getElementById('searchInput').addEventListener('input', function(e) {
+            const query = e.target.value.toLowerCase();
+            searchAlbums(query);
+        });
+
+        document.getElementById('searchBtn').addEventListener('click', function() {
+            const query = document.getElementById('searchInput').value.toLowerCase();
+            searchAlbums(query);
+        });
+
+        function searchAlbums(query) {
+            const albums = document.querySelectorAll('.album-card');
+            
+            if (query.length === 0) {
+                albums.forEach(album => album.style.display = 'block');
+                return;
+            }
+            
+            albums.forEach(album => {
+                const title = album.querySelector('h3').textContent.toLowerCase();
+                const description = album.querySelector('.album-description')?.textContent.toLowerCase() || '';
+                
+                if (title.includes(query) || description.includes(query)) {
+                    album.style.display = 'block';
+                    album.style.animation = 'fadeIn 0.3s ease';
+                } else {
+                    album.style.display = 'none';
+                }
+            });
+        }
+
+        // Album filtering
+        document.getElementById('albumFilter').addEventListener('change', function(e) {
+            const filter = e.target.value;
+            const albums = document.querySelectorAll('.album-card');
+            
+            albums.forEach(album => {
+                const featured = album.dataset.featured === 'true';
+                const releaseDate = new Date(album.querySelector('.release-date').textContent.replace('📅 ', ''));
+                const isRecent = (Date.now() - releaseDate.getTime()) < (90 * 24 * 60 * 60 * 1000); // 90 days
+                
+                let show = true;
+                switch(filter) {
+                    case 'featured':
+                        show = featured;
+                        break;
+                    case 'latest':
+                        show = isRecent;
+                        break;
+                    case 'popular':
+                        show = featured; // Using featured as proxy for popular
+                        break;
+                }
+                
+                album.style.display = show ? 'block' : 'none';
+            });
+        });
+
+        // Track streaming clicks
+        function trackClick(platform, albumId) {
+            fetch('/api/track-click.php', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    platform: platform,
+                    album_id: albumId,
+                    country: window.SITE_CONFIG.userCountry
+                })
+            }).catch(e => console.log('Analytics tracking failed:', e));
+        }
+
+        // Player functions
+        function playAlbum(albumId) {
+            const albumCard = document.querySelector(`[data-album-id="${albumId}"]`);
+            const title = albumCard.querySelector('h3').textContent;
+            const cover = albumCard.querySelector('img').src;
+            
+            // Update now playing bar
+            document.getElementById('npTitle').textContent = title;
+            document.getElementById('npCover').src = cover;
+            document.getElementById('nowPlaying').classList.add('active');
+            
+            // Show player modal
+            document.getElementById('musicPlayer').classList.add('active');
+            document.getElementById('playerTitle').textContent = title;
+            document.getElementById('playerArtwork').src = cover;
+            
+            // Load streaming options
+            loadStreamingOptions(albumId);
+        }
+
+        function loadStreamingOptions(albumId) {
+            fetch(`/api/get-stream.php?album_id=${albumId}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        const platformLinks = document.getElementById('platformLinks');
+                        platformLinks.innerHTML = '';
+                        
+                        data.data.forEach(link => {
+                            const platformLink = document.createElement('a');
+                            platformLink.href = link.url;
+                            platformLink.target = '_blank';
+                            platformLink.className = 'platform-link';
+                            platformLink.onclick = () => trackClick(link.platform, albumId);
+                            platformLink.innerHTML = `
+                                ${getIconForPlatform(link.platform)} 
+                                ${link.platform.replace('-', ' ')}
+                            `;
+                            platformLinks.appendChild(platformLink);
+                        });
+                    }
+                })
+                .catch(e => console.error('Failed to load streaming options:', e));
+        }
+
+        function closePlayer() {
+            document.getElementById('musicPlayer').classList.remove('active');
+        }
+
+        function getIconForPlatform(platform) {
+            const icons = {
+                'spotify': '🎵',
+                'apple-music': '🍎',
+                'youtube': '📺',
+                'soundcloud': '☁️',
+                'amazon-music': '📦',
+                'tidal': '🌊'
+            };
+            return icons[platform] || '🎵';
+        }
+
+        // Placeholder functions for other interactions
+        function toggleFavorite(albumId) {
+            console.log('Favorite toggled for album:', albumId);
+        }
+
+        function shareAlbum(albumId) {
+            if (navigator.share) {
+                navigator.share({
+                    title: document.querySelector(`[data-album-id="${albumId}"] h3`).textContent,
+                    text: 'Check out this music!',
+                    url: window.location.href
+                });
+            } else {
+                // Fallback - copy to clipboard
+                navigator.clipboard.writeText(window.location.href);
+                alert('Link copied to clipboard!');
+            }
+        }
+
+        function showTrackList(albumId) {
+            console.log('Show track list for album:', albumId);
+        }
+
+        function previousTrack() {
+            console.log('Previous track');
+        }
+
+        function nextTrack() {
+            console.log('Next track');
+        }
+
+        function scrollToContact() {
+            window.scrollTo({
+                top: document.body.scrollHeight,
+                behavior: 'smooth'
+            });
+        }
+
+        // Close now playing bar
+        document.getElementById('npClose').addEventListener('click', function() {
+            document.getElementById('nowPlaying').classList.remove('active');
+        });
     </script>
 </body>
 </html>
@@ -332,5 +590,17 @@ function getIconForPlatform($platform) {
         'tidal' => '🌊'
     ];
     return $icons[$platform] ?? '🎵';
+}
+
+function getSocialIcon($platform) {
+    $icons = [
+        'spotify' => '🎵',
+        'youtube' => '📺',
+        'soundcloud' => '☁️',
+        'instagram' => '📷',
+        'twitter' => '🐦',
+        'facebook' => '📘'
+    ];
+    return $icons[$platform] ?? '🔗';
 }
 ?>

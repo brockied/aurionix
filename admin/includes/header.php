@@ -47,11 +47,7 @@
                         <span class="item-icon">🔗</span>
                         <span>Add Link</span>
                     </a>
-                    <div class="dropdown-separator"></div>
-                    <a href="media.php?action=upload" class="dropdown-item">
-                        <span class="item-icon">📁</span>
-                        <span>Upload Media</span>
-                    </a>
+                    <!-- Removed Upload Media link as requested -->
                 </div>
             </div>
             
@@ -639,6 +635,9 @@
     }
 }
 </style>
+
+<!-- Admin helper script: provides global search and dropdown behaviours -->
+<script src="admin-script.js"></script>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {

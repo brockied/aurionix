@@ -57,24 +57,13 @@ $current_page = basename($_SERVER['PHP_SELF'], '.php');
                 </a>
             </li>
             
-            <li class="nav-separator">
-                <span>Content</span>
-            </li>
-            
-            <li class="nav-item">
-                <a href="media.php" class="nav-link <?= $current_page === 'media' ? 'active' : '' ?>">
-                    <span class="nav-icon">🖼️</span>
-                    <span class="nav-text">Media</span>
-                </a>
-            </li>
-            
-            <li class="nav-item">
+                        <li class="nav-item">
                 <a href="analytics.php" class="nav-link <?= $current_page === 'analytics' ? 'active' : '' ?>">
                     <span class="nav-icon">📈</span>
                     <span class="nav-text">Analytics</span>
                 </a>
             </li>
-            
+
             <li class="nav-separator">
                 <span>System</span>
             </li>

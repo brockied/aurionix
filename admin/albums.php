@@ -21,28 +21,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         // Handle file upload
         $cover_image = '';
-        if (isset($_FILES['cover_image']) && $_FILES['cover_image']['error'] === UPLOAD_ERR_OK) {
+        if (isset($_FILES['cover_image']) && $_FILES['cover_image']['error'] !== UPLOAD_ERR_NO_FILE) {
+            // Create uploads directory if needed
             $upload_dir = '../uploads/albums/';
             if (!is_dir($upload_dir)) {
                 mkdir($upload_dir, 0755, true);
             }
-            
-            $file_extension = pathinfo($_FILES['cover_image']['name'], PATHINFO_EXTENSION);
-            $filename = generateSlug($title) . '-' . time() . '.' . $file_extension;
-            $upload_path = $upload_dir . $filename;
-            
-            if (move_uploaded_file($_FILES['cover_image']['tmp_name'], $upload_path)) {
-                $cover_image = '/uploads/albums/' . $filename;
+            $file     = $_FILES['cover_image'];
+            $ext      = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+            $allowed  = ['jpg','jpeg','png','webp'];
+            if ($file['error'] !== UPLOAD_ERR_OK) {
+                $error = 'Cover image upload failed with error code ' . $file['error'];
+            } elseif (!in_array($ext, $allowed)) {
+                $error = 'Invalid cover image format. Allowed: JPG, PNG, WebP.';
+            } else {
+                $filename    = generateSlug($title) . '-' . time() . '.' . $ext;
+                $upload_path = $upload_dir . $filename;
+                if (move_uploaded_file($file['tmp_name'], $upload_path)) {
+                    // Store relative path without a leading slash so images work
+                    // regardless of subdirectory.  Display functions will
+                    // prepend '/' when generating img src attributes.
+                    $cover_image = 'uploads/albums/' . $filename;
+                } else {
+                    $error = 'Failed to move uploaded cover image. Please check directory permissions.';
+                }
             }
         }
         
-        try {
-            $stmt = $pdo->prepare("INSERT INTO albums (title, description, release_date, cover_image, featured) VALUES (?, ?, ?, ?, ?)");
-            $stmt->execute([$title, $description, $release_date, $cover_image, $featured]);
-            $message = 'Album added successfully!';
-            $action = 'list';
-        } catch (Exception $e) {
-            $error = 'Failed to add album: ' . $e->getMessage();
+        // Only insert into the database if no upload error was recorded
+        if (!$error) {
+            try {
+                $stmt = $pdo->prepare("INSERT INTO albums (title, description, release_date, cover_image, featured) VALUES (?, ?, ?, ?, ?)");
+                $stmt->execute([$title, $description, $release_date, $cover_image, $featured]);
+                $message = 'Album added successfully!';
+                $action = 'list';
+            } catch (Exception $e) {
+                $error = 'Failed to add album: ' . $e->getMessage();
+            }
         }
     }
     
@@ -60,32 +75,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $cover_image = $current_album['cover_image'];
         
         // Handle new file upload
-        if (isset($_FILES['cover_image']) && $_FILES['cover_image']['error'] === UPLOAD_ERR_OK) {
+        if (isset($_FILES['cover_image']) && $_FILES['cover_image']['error'] !== UPLOAD_ERR_NO_FILE) {
             $upload_dir = '../uploads/albums/';
             if (!is_dir($upload_dir)) {
                 mkdir($upload_dir, 0755, true);
             }
-            
-            $file_extension = pathinfo($_FILES['cover_image']['name'], PATHINFO_EXTENSION);
-            $filename = generateSlug($title) . '-' . time() . '.' . $file_extension;
-            $upload_path = $upload_dir . $filename;
-            
-            if (move_uploaded_file($_FILES['cover_image']['tmp_name'], $upload_path)) {
-                // Delete old image
-                if ($cover_image && file_exists('.' . $cover_image)) {
-                    unlink('.' . $cover_image);
+            $file    = $_FILES['cover_image'];
+            $ext     = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+            $allowed = ['jpg','jpeg','png','webp'];
+            if ($file['error'] !== UPLOAD_ERR_OK) {
+                $error = 'Cover image upload failed with error code ' . $file['error'];
+            } elseif (!in_array($ext, $allowed)) {
+                $error = 'Invalid cover image format. Allowed: JPG, PNG, WebP.';
+            } else {
+                $filename    = generateSlug($title) . '-' . time() . '.' . $ext;
+                $upload_path = $upload_dir . $filename;
+                if (move_uploaded_file($file['tmp_name'], $upload_path)) {
+                    // Delete old image (resolve relative path).  If the
+                    // existing cover_image is stored without a leading slash
+                    // prepend '../' to reach the root uploads directory.
+                    if ($cover_image) {
+                        $oldPath = '../' . ltrim($cover_image, '/');
+                        if (file_exists($oldPath)) {
+                            @unlink($oldPath);
+                        }
+                    }
+                    $cover_image = 'uploads/albums/' . $filename;
+                } else {
+                    $error = 'Failed to move uploaded cover image. Please check directory permissions.';
                 }
-                $cover_image = '/uploads/albums/' . $filename;
             }
         }
         
-        try {
-            $stmt = $pdo->prepare("UPDATE albums SET title = ?, description = ?, release_date = ?, cover_image = ?, featured = ? WHERE id = ?");
-            $stmt->execute([$title, $description, $release_date, $cover_image, $featured, $id]);
-            $message = 'Album updated successfully!';
-            $action = 'list';
-        } catch (Exception $e) {
-            $error = 'Failed to update album: ' . $e->getMessage();
+        // Only update the database if no upload error was recorded
+        if (!$error) {
+            try {
+                $stmt = $pdo->prepare("UPDATE albums SET title = ?, description = ?, release_date = ?, cover_image = ?, featured = ? WHERE id = ?");
+                $stmt->execute([$title, $description, $release_date, $cover_image, $featured, $id]);
+                $message = 'Album updated successfully!';
+                $action = 'list';
+            } catch (Exception $e) {
+                $error = 'Failed to update album: ' . $e->getMessage();
+            }
         }
     }
 }
@@ -104,9 +135,17 @@ if ($action === 'delete' && isset($_GET['id'])) {
         $stmt = $pdo->prepare("DELETE FROM albums WHERE id = ?");
         $stmt->execute([$id]);
         
-        // Delete cover image
-        if ($album && $album['cover_image'] && file_exists('.' . $album['cover_image'])) {
-            unlink('.' . $album['cover_image']);
+        // Delete cover image.  Resolve physical path using '..' so that
+        // '/uploads/...' points to the correct directory.  Using '.' would
+        // resolve to the admin directory which does not contain uploads.
+        if ($album && $album['cover_image']) {
+            // Build the physical file path.  The cover_image is stored
+            // without a leading slash (e.g. uploads/albums/file.jpg), so
+            // prepend '../' to reach the root web directory.
+            $filePath = '../' . ltrim($album['cover_image'], '/');
+            if (file_exists($filePath)) {
+                unlink($filePath);
+            }
         }
         
         $message = 'Album deleted successfully!';
@@ -262,7 +301,7 @@ if ($action === 'edit' && isset($_GET['id']) && $_SERVER['REQUEST_METHOD'] !== '
                             <?php foreach ($albums as $album): ?>
                                 <div class="album-card">
                                     <div class="album-cover">
-                                        <img src="<?= $album['cover_image'] ?: '../assets/default-cover.jpg' ?>" 
+                                        <img src="<?= htmlspecialchars($album['cover_image'] ? '/' . $album['cover_image'] : '/assets/default-cover.jpg') ?>"
                                              alt="<?= htmlspecialchars($album['title']) ?>">
                                         <div class="album-overlay">
                                             <div class="album-actions">
@@ -318,6 +357,14 @@ if ($action === 'edit' && isset($_GET['id']) && $_SERVER['REQUEST_METHOD'] !== '
                                             <span class="stat-item">🎼 <?= $track_count ?> tracks</span>
                                             <span class="stat-item">🔗 <?= $link_count ?> links</span>
                                         </div>
+
+                                        <!-- Always-visible action row for better accessibility -->
+                                        <div class="album-actions-row">
+                                            <a href="?action=edit&id=<?= $album['id'] ?>" class="btn-icon" title="Edit Album">✏️</a>
+                                            <a href="tracks.php?album_id=<?= $album['id'] ?>" class="btn-icon" title="Manage Tracks">🎼</a>
+                                            <a href="streaming-links.php?album_id=<?= $album['id'] ?>" class="btn-icon" title="Streaming Links">🔗</a>
+                                            <a href="?action=delete&id=<?= $album['id'] ?>" class="btn-icon btn-danger" title="Delete Album" onclick="return confirm('Are you sure you want to delete this album?')">🗑️</a>
+                                        </div>
                                     </div>
                                 </div>
                             <?php endforeach; ?>
@@ -341,7 +388,7 @@ if ($action === 'edit' && isset($_GET['id']) && $_SERVER['REQUEST_METHOD'] !== '
                                     <?php foreach ($albums as $album): ?>
                                         <tr>
                                             <td>
-                                                <img src="<?= $album['cover_image'] ?: '../assets/default-cover.jpg' ?>" 
+                                                <img src="<?= $album['cover_image'] ? '/' . $album['cover_image'] : '/assets/default-cover.jpg' ?>" 
                                                      alt="<?= htmlspecialchars($album['title']) ?>"
                                                      class="table-cover">
                                             </td>
@@ -461,8 +508,8 @@ if ($action === 'edit' && isset($_GET['id']) && $_SERVER['REQUEST_METHOD'] !== '
                                     
                                     <?php if (isset($edit_album) && $edit_album['cover_image']): ?>
                                         <div class="current-cover">
-                                            <img src="<?= $edit_album['cover_image'] ?>" 
-                                                 alt="Current cover" 
+                                            <img src="<?= htmlspecialchars($edit_album['cover_image']) ?>"
+                                                 alt="Current cover"
                                                  class="cover-preview">
                                             <p>Current cover image</p>
                                         </div>
@@ -813,60 +860,78 @@ if ($action === 'edit' && isset($_GET['id']) && $_SERVER['REQUEST_METHOD'] !== '
     </style>
     
     <script>
-        // Search functionality
-        document.getElementById('searchInput').addEventListener('input', function() {
-            const searchTerm = this.value.toLowerCase();
-            // Implement real-time search if needed
-        });
+        // Search functionality – only attach if the search input exists on the current view
+        const searchEl = document.getElementById('searchInput');
+        if (searchEl) {
+            searchEl.addEventListener('input', function () {
+                const searchTerm = this.value.toLowerCase();
+                // Implement real-time search if needed
+            });
+        }
         
-        // Filter functionality
-        document.getElementById('filterSelect').addEventListener('change', function() {
-            updateURL();
-        });
+        // Filter functionality – only attach if the filter select exists
+        const filterEl = document.getElementById('filterSelect');
+        if (filterEl) {
+            filterEl.addEventListener('change', function () {
+                updateURL();
+            });
+        }
         
-        // Sort functionality
-        document.getElementById('sortSelect').addEventListener('change', function() {
-            updateURL();
-        });
+        // Sort functionality – only attach if the sort select exists
+        const sortEl = document.getElementById('sortSelect');
+        if (sortEl) {
+            sortEl.addEventListener('change', function () {
+                updateURL();
+            });
+        }
         
-        // View toggle
+        // View toggle – attach on list page where view buttons exist
         document.querySelectorAll('.view-btn').forEach(btn => {
-            btn.addEventListener('click', function() {
+            btn.addEventListener('click', function () {
                 const view = this.dataset.view;
-                
                 document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
                 this.classList.add('active');
-                
                 if (view === 'grid') {
-                    document.getElementById('albumsGrid').style.display = 'grid';
-                    document.getElementById('albumsList').style.display = 'none';
+                    const grid = document.getElementById('albumsGrid');
+                    const list = document.getElementById('albumsList');
+                    if (grid) grid.style.display = 'grid';
+                    if (list) list.style.display = 'none';
                 } else {
-                    document.getElementById('albumsGrid').style.display = 'none';
-                    document.getElementById('albumsList').style.display = 'block';
+                    const grid = document.getElementById('albumsGrid');
+                    const list = document.getElementById('albumsList');
+                    if (grid) grid.style.display = 'none';
+                    if (list) list.style.display = 'block';
                 }
             });
         });
         
-        // File upload preview
-        document.getElementById('cover_image').addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            if (file) {
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    // Create or update preview
-                    let preview = document.querySelector('.upload-preview');
-                    if (!preview) {
-                        preview = document.createElement('div');
-                        preview.className = 'upload-preview';
-                        preview.innerHTML = '<img class="preview-img"><p>Selected image</p>';
-                        document.querySelector('.file-upload').parentNode.appendChild(preview);
-                    }
-                    preview.querySelector('.preview-img').src = e.target.result;
-                    preview.style.display = 'block';
-                };
-                reader.readAsDataURL(file);
-            }
-        });
+        // File upload preview – only attach on add/edit pages where the cover_image input exists
+        const coverInput = document.getElementById('cover_image');
+        if (coverInput) {
+            coverInput.addEventListener('change', function (e) {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = function (ev) {
+                        // Create or update preview
+                        let preview = document.querySelector('.upload-preview');
+                        if (!preview) {
+                            preview = document.createElement('div');
+                            preview.className = 'upload-preview';
+                            preview.innerHTML = '<img class="preview-img"><p>Selected image</p>';
+                            const uploadContainer = document.querySelector('.file-upload');
+                            if (uploadContainer && uploadContainer.parentNode) {
+                                uploadContainer.parentNode.appendChild(preview);
+                            }
+                        }
+                        const img = preview.querySelector('.preview-img');
+                        if (img) img.src = ev.target.result;
+                        preview.style.display = 'block';
+                    };
+                    reader.readAsDataURL(file);
+                }
+            });
+        }
         
         function updateURL() {
             const search = document.getElementById('searchInput').value;

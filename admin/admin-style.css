@@ -812,3 +812,94 @@ body {
 ::-webkit-scrollbar-thumb:hover {
     background: rgba(233, 69, 96, 0.7);
 }
+
+/*
+ * Ensure action icons on album cards are fully visible.  The default
+ * styles hide the overlay content, causing icons to be clipped or
+ * inaccessible.  These overrides position the overlay to fill the
+ * entire cover, provide a semi‑transparent background, and fade it
+ * in on hover.  Icons are centered within the overlay.
+ */
+.album-card .album-cover {
+    /* Position relative so that overlay absolutely positions over the entire cover.
+       Use overflow hidden to prevent overlay or image overflow.  Add a slight
+       border radius to soften edges. */
+    position: relative;
+    overflow: hidden;
+    border-radius: 8px;
+}
+.album-card .album-cover .album-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    padding: 10px;
+    box-sizing: border-box;
+    z-index: 2;
+}
+.album-card:hover .album-cover .album-overlay {
+    opacity: 1;
+}
+.album-card .album-cover .album-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: center;
+    align-items: center;
+}
+/* Increase icon size within album actions for better tap targets and visibility */
+.album-card .album-cover .album-actions .btn-icon {
+    font-size: 1.25rem;
+}
+
+/* Ensure album cover images fill their container without overflowing */
+.album-card .album-cover img {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
+/* Preview for uploaded cover images on the add/edit album form */
+.upload-preview {
+    margin-top: 15px;
+    border: 2px dashed rgba(255, 255, 255, 0.2);
+    border-radius: 8px;
+    padding: 10px;
+    max-width: 200px;
+    max-height: 200px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+}
+.upload-preview .preview-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 4px;
+}
+.upload-preview p {
+    font-size: 0.9rem;
+    color: rgba(255, 255, 255, 0.7);
+    text-align: center;
+    margin: 0;
+}
+
+/* Action row on album cards (admin grid view) */
+.album-actions-row {
+    margin-top: 8px;
+    display: flex;
+    gap: 10px;
+}
+.album-actions-row .btn-icon {
+    font-size: 1.1rem;
+}

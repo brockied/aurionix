@@ -246,8 +246,13 @@ class AurionixPlayer {
     }
     
     initStreamingLinks() {
+        // Attach click handlers to streaming buttons.  Prevent the
+        // default anchor navigation so we can decide whether to open
+        // an embed or fall back to a new tab.  We also stop
+        // propagation so the click doesn't trigger any parent handlers.
         document.querySelectorAll('.streaming-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
+                e.preventDefault();
                 e.stopPropagation();
                 this.handleStreamingClick(btn);
             });
@@ -255,37 +260,61 @@ class AurionixPlayer {
     }
     
     handleStreamingClick(btn) {
-        const platform = btn.className.match(/streaming-(\w+)/)?.[1];
+        // Determine the platform from the button's class, and find the
+        // associated album by traversing up to its card.  If either
+        // value is missing, simply open the link in a new tab.
+        const match    = btn.className.match(/streaming-(\w+)/);
+        const platform = match ? match[1] : null;
         const albumCard = btn.closest('.album-card');
-        const albumId = albumCard?.dataset.albumId;
-        
-        if (platform && albumId) {
-            // Track click for analytics
-            this.trackStreamingClick(platform, albumId);
-            
-            // Handle different platforms
-            switch(platform) {
-                case 'spotify':
-                    this.openSpotify(btn.href, albumId);
-                    break;
-                case 'youtube':
-                    this.openYouTube(btn.href, albumId);
-                    break;
-                default:
-                    window.open(btn.href, '_blank');
-            }
+        const albumId   = albumCard?.dataset.albumId;
+        if (!platform || !albumId) {
+            window.open(btn.href, '_blank');
+            return;
+        }
+        // Record analytics
+        this.trackStreamingClick(platform, albumId);
+        // Choose behaviour based on platform
+        switch (platform) {
+            case 'spotify':
+                this.openSpotify(btn.href, albumId);
+                break;
+            case 'youtube':
+                this.openYouTube(btn.href, albumId);
+                break;
+            default:
+                window.open(btn.href, '_blank');
         }
     }
     
     openSpotify(url, albumId) {
-        // Try to open in Spotify app first, then web
-        const spotifyApp = url.replace('https://open.spotify.com', 'spotify');
-        window.location.href = spotifyApp;
-        
-        // Fallback to web after 2 seconds
-        setTimeout(() => {
-            window.open(url, '_blank');
-        }, 2000);
+        // Attempt to load an embedded Spotify player if embed code is
+        // available for this album.  If an embed is returned from the
+        // API, display it within the player modal; otherwise fall back
+        // to opening the link in a new tab.  Note: we do not redirect
+        // the browser to the Spotify app directly to avoid unexpected
+        // navigation.
+        const country = window.SITE_CONFIG?.userCountry || 'US';
+        fetch(`/api/get-stream.php?album_id=${albumId}&platform=spotify&country=${country}`)
+            .then(res => res.json())
+            .then(data => {
+                let embed = '';
+                if (data && data.success && data.data && data.data.embed_code) {
+                    embed = data.data.embed_code;
+                }
+                if (embed) {
+                    const embedContainer = document.getElementById('embedContainer');
+                    if (embedContainer) {
+                        embedContainer.innerHTML = embed;
+                        this.showPlayerModal();
+                    }
+                } else {
+                    // No embed available; open the link in a new tab
+                    window.open(url, '_blank');
+                }
+            })
+            .catch(() => {
+                window.open(url, '_blank');
+            });
     }
     
     openYouTube(url, albumId) {
@@ -353,13 +382,32 @@ class AurionixPlayer {
     }
     
     loadBestAvailableStream(albumId) {
-        // In a real implementation, this would fetch the best available stream
-        // based on user's country and platform preferences
-        fetch(`/api/get-stream.php?album_id=${albumId}&country=${window.SITE_CONFIG?.userCountry || 'US'}`)
+        // Fetch all available streams for this album and pick the first
+        // embed code if available.  The API returns an array of links
+        // under the `data` property.  We prioritise country‑specific
+        // streams server‑side via SQL ordering.
+        const country = window.SITE_CONFIG?.userCountry || 'US';
+        fetch(`/api/get-stream.php?album_id=${albumId}&country=${country}`)
             .then(response => response.json())
             .then(data => {
-                if (data.embed_code) {
-                    document.getElementById('embedContainer').innerHTML = data.embed_code;
+                if (!data || !data.success) return;
+                let embed = '';
+                if (Array.isArray(data.data)) {
+                    for (const link of data.data) {
+                        if (link.embed_code) {
+                            embed = link.embed_code;
+                            break;
+                        }
+                    }
+                } else if (data.data && data.data.embed_code) {
+                    // API may return a single object
+                    embed = data.data.embed_code;
+                }
+                if (embed) {
+                    const embedContainer = document.getElementById('embedContainer');
+                    if (embedContainer) {
+                        embedContainer.innerHTML = embed;
+                    }
                 }
             })
             .catch(error => {
@@ -709,3 +757,37 @@ if ('serviceWorker' in navigator) {
             });
     });
 }
+
+/*
+ * Helper functions exposed on the global window object.  These functions
+ * allow template markup in index.php to call JavaScript without being
+ * encapsulated within the AurionixPlayer class.  They are intentionally
+ * lightweight: showTrackList navigates to an album detail page where the
+ * user can view and play individual tracks, while shareAlbum copies the
+ * album URL to the clipboard for easy sharing.  If the clipboard API is
+ * unavailable or the copy fails, no error is thrown.
+ */
+function showTrackList(albumId) {
+    if (!albumId) return;
+    // Navigate to the dedicated album page
+    window.location.href = '/album.php?id=' + encodeURIComponent(albumId);
+}
+
+function shareAlbum(albumId) {
+    if (!albumId) return;
+    const url = window.location.origin + '/album.php?id=' + encodeURIComponent(albumId);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(() => {
+            alert('Album link copied to clipboard.');
+        }).catch(() => {
+            // Fallback: open the link in a new tab if copy fails
+            window.open(url, '_blank');
+        });
+    } else {
+        // Fallback for browsers without clipboard API
+        window.open(url, '_blank');
+    }
+}
+// Expose globally
+window.showTrackList = showTrackList;
+window.shareAlbum = shareAlbum;

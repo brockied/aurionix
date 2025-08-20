@@ -30,15 +30,52 @@ $recent_albums = $stmt->fetchAll();
 $stmt = $pdo->query("SELECT platform, COUNT(*) as count FROM streaming_links GROUP BY platform ORDER BY count DESC");
 $platform_stats = $stmt->fetchAll();
 
-// Monthly clicks (dummy data for demo)
-$monthly_clicks = [
-    ['month' => 'Jan', 'clicks' => 1250],
-    ['month' => 'Feb', 'clicks' => 1890],
-    ['month' => 'Mar', 'clicks' => 2340],
-    ['month' => 'Apr', 'clicks' => 1970],
-    ['month' => 'May', 'clicks' => 2650],
-    ['month' => 'Jun', 'clicks' => 3120]
-];
+// Monthly clicks for the past 6 months
+// Replace the demo data with live statistics pulled from the database.  If the
+// streaming_clicks table doesn't exist yet (for example on a fresh install),
+// wrap the query in a try/catch to avoid fatal errors.  Each element
+// contains the short month name (e.g. "Jan") and the total click count for
+// that month.
+$monthly_clicks = [];
+try {
+    for ($i = 5; $i >= 0; $i--) {
+        // Determine the month we are querying, e.g. current month - $i months
+        $startDate = date('Y-m-01', strtotime("-{$i} months"));
+        $endDate   = date('Y-m-t', strtotime($startDate));
+        $stmt      = $pdo->prepare("SELECT COUNT(*) AS clicks FROM streaming_clicks WHERE clicked_at BETWEEN ? AND ?");
+        $stmt->execute([$startDate, $endDate]);
+        $count = $stmt->fetch()['clicks'] ?? 0;
+        $monthly_clicks[] = [
+            'month'  => date('M', strtotime($startDate)),
+            'clicks' => (int)$count
+        ];
+    }
+} catch (Exception $e) {
+    // In case of any error (e.g. table doesn't exist), fall back to zeros
+    $monthly_clicks = [];
+    for ($i = 5; $i >= 0; $i--) {
+        $monthly_clicks[] = [
+            'month'  => date('M', strtotime("-{$i} months")),
+            'clicks' => 0
+        ];
+    }
+}
+
+// Calculate monthly plays.  For now we treat a streaming click as a play.  The
+// current month is the last element in $monthly_clicks.  If there is no
+// previous month, set growth to zero.
+$currentMonthPlays = $monthly_clicks[count($monthly_clicks) - 1]['clicks'] ?? 0;
+$previousMonthPlays = $monthly_clicks[count($monthly_clicks) - 2]['clicks'] ?? 0;
+$playsGrowth = 0;
+if ($previousMonthPlays > 0) {
+    $playsGrowth = round((($currentMonthPlays - $previousMonthPlays) / $previousMonthPlays) * 100);
+}
+
+// Total plays over the last six months
+$totalSixMonths = 0;
+foreach ($monthly_clicks as $m) {
+    $totalSixMonths += $m['clicks'];
+}
 ?>
 
 <!DOCTYPE html>
@@ -97,10 +134,25 @@ $monthly_clicks = [
                 <div class="stat-card">
                     <div class="stat-icon">👥</div>
                     <div class="stat-info">
-                        <h3>15.2K</h3>
+                        <h3><?= number_format($currentMonthPlays) ?></h3>
                         <p>Monthly Plays</p>
                     </div>
-                    <div class="stat-trend positive">↗ +28%</div>
+                    <?php
+                    // Determine the trend class and arrow based on growth rate
+                    $trendClass = 'neutral';
+                    $trendArrow = '→';
+                    if ($playsGrowth > 0) {
+                        $trendClass = 'positive';
+                        $trendArrow = '↗';
+                    } elseif ($playsGrowth < 0) {
+                        $trendClass = 'negative';
+                        $trendArrow = '↘';
+                    }
+                    ?>
+                    <div class="stat-trend <?= $trendClass ?>">
+                        <?= $trendArrow ?>
+                        <?= ($playsGrowth >= 0 ? '+' : '') . $playsGrowth ?>%
+                    </div>
                 </div>
             </div>
             
@@ -167,15 +219,21 @@ $monthly_clicks = [
                         
                         <div class="chart-summary">
                             <div class="chart-stat">
-                                <span class="stat-value">2,650</span>
+                                <span class="stat-value">
+                                    <?= number_format($currentMonthPlays) ?>
+                                </span>
                                 <span class="stat-label">This Month</span>
                             </div>
                             <div class="chart-stat">
-                                <span class="stat-value">+18%</span>
+                                <span class="stat-value">
+                                    <?= ($playsGrowth >= 0 ? '+' : '') . $playsGrowth ?>%
+                                </span>
                                 <span class="stat-label">vs Last Month</span>
                             </div>
                             <div class="chart-stat">
-                                <span class="stat-value">13.2K</span>
+                                <span class="stat-value">
+                                    <?= number_format($totalSixMonths) ?>
+                                </span>
                                 <span class="stat-label">Total 6 Months</span>
                             </div>
                         </div>
