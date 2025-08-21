@@ -1,170 +1,49 @@
 <?php
-/**
- * COMPLETE ALBUMS & TRACKS MANAGEMENT SYSTEM - FIXED VERSION
- * Compatible with existing database, better styling, and upgrade system
- */
-
 require_once '../config.php';
 requireAdmin();
 
-// Initialize variables
-$action = $_POST['action'] ?? ($_GET['action'] ?? 'list');
-$album_id = $_POST['album_id'] ?? ($_GET['album_id'] ?? '');
+$action = $_GET['action'] ?? 'list';
 $message = '';
 $error = '';
 
-// Check what columns exist in current database
-function checkColumnExists($pdo, $table, $column) {
-    try {
-        $stmt = $pdo->prepare("SHOW COLUMNS FROM `$table` LIKE ?");
-        $stmt->execute([$column]);
-        return $stmt->rowCount() > 0;
-    } catch (Exception $e) {
-        return false;
+// Create upload directories if they don't exist
+$upload_dirs = ['../uploads', '../uploads/albums', '../uploads/tracks'];
+foreach ($upload_dirs as $dir) {
+    if (!is_dir($dir)) {
+        mkdir($dir, 0755, true);
     }
-}
-
-// Enhanced database upgrade system
-function upgradeDatabase($pdo) {
-    try {
-        // Check and add missing columns to albums table
-        if (!checkColumnExists($pdo, 'albums', 'slug')) {
-            $pdo->exec("ALTER TABLE albums ADD COLUMN slug VARCHAR(255) AFTER title");
-            $pdo->exec("ALTER TABLE albums ADD INDEX idx_slug (slug)");
-        }
-        
-        if (!checkColumnExists($pdo, 'albums', 'play_type')) {
-            $pdo->exec("ALTER TABLE albums ADD COLUMN play_type ENUM('full', 'clip') DEFAULT 'full' AFTER featured");
-        }
-        
-        if (!checkColumnExists($pdo, 'albums', 'total_tracks')) {
-            $pdo->exec("ALTER TABLE albums ADD COLUMN total_tracks INT DEFAULT 0 AFTER play_type");
-        }
-        
-        // Check and add missing columns to tracks table
-        if (!checkColumnExists($pdo, 'tracks', 'slug')) {
-            $pdo->exec("ALTER TABLE tracks ADD COLUMN slug VARCHAR(255) AFTER title");
-            $pdo->exec("ALTER TABLE tracks ADD INDEX idx_slug (slug)");
-        }
-        
-        if (!checkColumnExists($pdo, 'tracks', 'audio_file')) {
-            $pdo->exec("ALTER TABLE tracks ADD COLUMN audio_file VARCHAR(500) AFTER track_number");
-        }
-        
-        if (!checkColumnExists($pdo, 'tracks', 'file_size')) {
-            $pdo->exec("ALTER TABLE tracks ADD COLUMN file_size INT DEFAULT 0 AFTER audio_file");
-        }
-        
-        if (!checkColumnExists($pdo, 'tracks', 'play_type')) {
-            $pdo->exec("ALTER TABLE tracks ADD COLUMN play_type ENUM('full', 'clip') DEFAULT 'full' AFTER file_size");
-        }
-        
-        if (!checkColumnExists($pdo, 'tracks', 'lyrics')) {
-            $pdo->exec("ALTER TABLE tracks ADD COLUMN lyrics TEXT AFTER play_type");
-        }
-        
-        if (!checkColumnExists($pdo, 'tracks', 'featured')) {
-            $pdo->exec("ALTER TABLE tracks ADD COLUMN featured TINYINT(1) DEFAULT 0 AFTER lyrics");
-            $pdo->exec("ALTER TABLE tracks ADD INDEX idx_featured (featured)");
-        }
-        
-        // Create album_streaming_links table if it doesn't exist
-        $pdo->exec("
-            CREATE TABLE IF NOT EXISTS album_streaming_links (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                album_id INT NOT NULL,
-                platform VARCHAR(100) NOT NULL,
-                url VARCHAR(500) NOT NULL,
-                embed_code TEXT,
-                display_order INT DEFAULT 0,
-                is_active TINYINT(1) DEFAULT 1,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (album_id) REFERENCES albums(id) ON DELETE CASCADE,
-                INDEX idx_album_platform (album_id, platform)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        ");
-        
-        return true;
-    } catch (Exception $e) {
-        error_log("Database upgrade error: " . $e->getMessage());
-        return false;
-    }
-}
-
-// Run database upgrade
-$database_upgraded = upgradeDatabase($pdo);
-
-// Check what features are available
-$has_audio_support = checkColumnExists($pdo, 'tracks', 'audio_file');
-$has_enhanced_tables = checkColumnExists($pdo, 'albums', 'slug');
-$has_streaming_links = false;
-try {
-    $stmt = $pdo->query("SHOW TABLES LIKE 'album_streaming_links'");
-    $has_streaming_links = $stmt->rowCount() > 0;
-} catch (Exception $e) {
-    $has_streaming_links = false;
-}
-
-// Audio file validation function
-function validateAudioFile($file) {
-    $allowed_types = ['mp3', 'wav', 'flac', 'm4a', 'aac', 'ogg'];
-    $max_size = 50 * 1024 * 1024; // 50MB
-    
-    if ($file['error'] !== UPLOAD_ERR_OK) {
-        return "Upload error code: " . $file['error'];
-    }
-    
-    $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
-    if (!in_array($ext, $allowed_types)) {
-        return "Invalid audio format. Allowed: " . implode(', ', $allowed_types);
-    }
-    
-    if ($file['size'] > $max_size) {
-        return "File too large. Maximum size: 50MB";
-    }
-    
-    return null; // No errors
 }
 
 // Handle form submissions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if ($action === 'save_album') {
-        $album_id = $_POST['album_id'] ?? '';
+    if ($action === 'add' || $action === 'edit') {
+        $album_id = $_POST['album_id'] ?? null;
         $title = sanitizeInput($_POST['title']);
         $description = sanitizeInput($_POST['description']);
         $release_date = $_POST['release_date'];
         $featured = isset($_POST['featured']) ? 1 : 0;
-        $play_type = $_POST['play_type'] ?? 'full';
-        
-        $slug = $has_enhanced_tables ? generateSlug($title) : '';
         
         // Handle cover image upload
         $cover_image = '';
         if ($album_id) {
+            // Get existing cover
             $stmt = $pdo->prepare("SELECT cover_image FROM albums WHERE id = ?");
             $stmt->execute([$album_id]);
-            $current = $stmt->fetch();
-            $cover_image = $current['cover_image'] ?? '';
+            $existing = $stmt->fetch();
+            $cover_image = $existing['cover_image'] ?? '';
         }
         
-        if (isset($_FILES['cover_image']) && $_FILES['cover_image']['error'] !== UPLOAD_ERR_NO_FILE) {
-            $upload_dir = '../uploads/albums/';
-            if (!is_dir($upload_dir)) {
-                mkdir($upload_dir, 0755, true);
-            }
-            
+        if (isset($_FILES['cover_image']) && $_FILES['cover_image']['error'] === UPLOAD_ERR_OK) {
             $file = $_FILES['cover_image'];
             $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
-            $allowed = ['jpg','jpeg','png','webp'];
+            $allowed = ['jpg', 'jpeg', 'png', 'webp'];
             
-            if ($file['error'] !== UPLOAD_ERR_OK) {
-                $error = 'Cover image upload failed';
-            } elseif (!in_array($ext, $allowed)) {
-                $error = 'Invalid cover image format. Use JPG, PNG, or WebP';
-            } else {
-                $filename = ($slug ?: 'album') . '-cover-' . time() . '.' . $ext;
-                $upload_path = $upload_dir . $filename;
+            if (in_array($ext, $allowed)) {
+                $filename = 'album-' . time() . '.' . $ext;
+                $upload_path = '../uploads/albums/' . $filename;
+                
                 if (move_uploaded_file($file['tmp_name'], $upload_path)) {
+                    // Delete old cover if exists
                     if ($cover_image && file_exists('../' . ltrim($cover_image, '/'))) {
                         @unlink('../' . ltrim($cover_image, '/'));
                     }
@@ -172,129 +51,82 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } else {
                     $error = 'Failed to upload cover image';
                 }
+            } else {
+                $error = 'Invalid image format. Use JPG, PNG, or WebP';
             }
         }
         
         if (!$error) {
             try {
                 if ($album_id) {
-                    // Update existing album
-                    if ($has_enhanced_tables) {
-                        $stmt = $pdo->prepare("UPDATE albums SET title = ?, slug = ?, description = ?, release_date = ?, cover_image = ?, featured = ?, play_type = ? WHERE id = ?");
-                        $stmt->execute([$title, $slug, $description, $release_date, $cover_image, $featured, $play_type, $album_id]);
-                    } else {
-                        $stmt = $pdo->prepare("UPDATE albums SET title = ?, description = ?, release_date = ?, cover_image = ?, featured = ? WHERE id = ?");
-                        $stmt->execute([$title, $description, $release_date, $cover_image, $featured, $album_id]);
-                    }
+                    // Update album
+                    $stmt = $pdo->prepare("UPDATE albums SET title = ?, description = ?, release_date = ?, cover_image = ?, featured = ? WHERE id = ?");
+                    $stmt->execute([$title, $description, $release_date, $cover_image, $featured, $album_id]);
+                    $message = 'Album updated successfully!';
                 } else {
-                    // Create new album
-                    if ($has_enhanced_tables) {
-                        $stmt = $pdo->prepare("INSERT INTO albums (title, slug, description, release_date, cover_image, featured, play_type) VALUES (?, ?, ?, ?, ?, ?, ?)");
-                        $stmt->execute([$title, $slug, $description, $release_date, $cover_image, $featured, $play_type]);
-                    } else {
-                        $stmt = $pdo->prepare("INSERT INTO albums (title, description, release_date, cover_image, featured) VALUES (?, ?, ?, ?, ?)");
-                        $stmt->execute([$title, $description, $release_date, $cover_image, $featured]);
-                    }
+                    // Create album
+                    $stmt = $pdo->prepare("INSERT INTO albums (title, description, release_date, cover_image, featured) VALUES (?, ?, ?, ?, ?)");
+                    $stmt->execute([$title, $description, $release_date, $cover_image, $featured]);
                     $album_id = $pdo->lastInsertId();
+                    $message = 'Album created successfully!';
                 }
                 
                 // Handle tracks
                 if (isset($_POST['tracks']) && is_array($_POST['tracks'])) {
                     foreach ($_POST['tracks'] as $index => $track_data) {
-                        if (!empty($track_data['title'])) {
-                            $track_title = sanitizeInput($track_data['title']);
-                            $track_duration = $track_data['duration'] ?? '';
-                            $track_number = $index + 1;
-                            $track_id = $track_data['track_id'] ?? '';
+                        if (empty($track_data['title'])) continue;
+                        
+                        $track_id = $track_data['id'] ?? null;
+                        $track_title = sanitizeInput($track_data['title']);
+                        $track_number = (int)$track_data['track_number'];
+                        
+                        // Handle audio file upload
+                        $audio_file = '';
+                        $file_size = 0;
+                        
+                        if ($track_id) {
+                            // Get existing audio file
+                            $stmt = $pdo->prepare("SELECT audio_file, file_size FROM tracks WHERE id = ?");
+                            $stmt->execute([$track_id]);
+                            $existing = $stmt->fetch();
+                            $audio_file = $existing['audio_file'] ?? '';
+                            $file_size = $existing['file_size'] ?? 0;
+                        }
+                        
+                        if (isset($_FILES['track_audio'][$index]) && $_FILES['track_audio'][$index]['error'] === UPLOAD_ERR_OK) {
+                            $audio_upload = $_FILES['track_audio'][$index];
+                            $ext = strtolower(pathinfo($audio_upload['name'], PATHINFO_EXTENSION));
+                            $allowed_audio = ['mp3', 'wav', 'flac', 'm4a'];
                             
-                            // Prepare data based on available columns
-                            $track_slug = $has_enhanced_tables ? generateSlug($track_title) : '';
-                            $track_play_type = ($has_enhanced_tables && isset($track_data['play_type'])) ? $track_data['play_type'] : $play_type;
-                            $track_lyrics = ($has_enhanced_tables && isset($track_data['lyrics'])) ? sanitizeInput($track_data['lyrics']) : '';
-                            $track_featured = ($has_enhanced_tables && isset($track_data['featured'])) ? 1 : 0;
-                            
-                            // Handle audio file upload if supported
-                            $audio_file = '';
-                            $file_size = 0;
-                            
-                            if ($has_audio_support && $track_id) {
-                                $stmt = $pdo->prepare("SELECT audio_file, file_size FROM tracks WHERE id = ?");
-                                $stmt->execute([$track_id]);
-                                $existing = $stmt->fetch();
-                                $audio_file = $existing['audio_file'] ?? '';
-                                $file_size = $existing['file_size'] ?? 0;
-                            }
-                            
-                            if ($has_audio_support && isset($_FILES['track_audio'][$index]) && $_FILES['track_audio'][$index]['error'] !== UPLOAD_ERR_NO_FILE) {
-                                $audio_upload = $_FILES['track_audio'][$index];
-                                $validation_error = validateAudioFile($audio_upload);
+                            if (in_array($ext, $allowed_audio) && $audio_upload['size'] <= 52428800) { // 50MB
+                                $audio_filename = 'track-' . time() . '-' . $index . '.' . $ext;
+                                $audio_path = '../uploads/tracks/' . $audio_filename;
                                 
-                                if (!$validation_error) {
-                                    $audio_dir = '../uploads/tracks/';
-                                    if (!is_dir($audio_dir)) {
-                                        mkdir($audio_dir, 0755, true);
+                                if (move_uploaded_file($audio_upload['tmp_name'], $audio_path)) {
+                                    // Delete old audio file
+                                    if ($audio_file && file_exists('../' . ltrim($audio_file, '/'))) {
+                                        @unlink('../' . ltrim($audio_file, '/'));
                                     }
-                                    
-                                    $ext = strtolower(pathinfo($audio_upload['name'], PATHINFO_EXTENSION));
-                                    $audio_filename = ($slug ?: 'track') . '-' . ($track_slug ?: $track_number) . '-' . time() . '.' . $ext;
-                                    $audio_path = $audio_dir . $audio_filename;
-                                    
-                                    if (move_uploaded_file($audio_upload['tmp_name'], $audio_path)) {
-                                        if ($audio_file && file_exists('../' . ltrim($audio_file, '/'))) {
-                                            @unlink('../' . ltrim($audio_file, '/'));
-                                        }
-                                        $audio_file = 'uploads/tracks/' . $audio_filename;
-                                        $file_size = $audio_upload['size'];
-                                    }
+                                    $audio_file = 'uploads/tracks/' . $audio_filename;
+                                    $file_size = $audio_upload['size'];
                                 }
                             }
-                            
-                            // Save/update track based on available columns
-                            if ($track_id) {
-                                if ($has_audio_support && $has_enhanced_tables) {
-                                    $stmt = $pdo->prepare("UPDATE tracks SET title = ?, slug = ?, duration = ?, track_number = ?, audio_file = ?, file_size = ?, play_type = ?, lyrics = ?, featured = ? WHERE id = ?");
-                                    $stmt->execute([$track_title, $track_slug, $track_duration, $track_number, $audio_file, $file_size, $track_play_type, $track_lyrics, $track_featured, $track_id]);
-                                } else {
-                                    $stmt = $pdo->prepare("UPDATE tracks SET title = ?, duration = ?, track_number = ? WHERE id = ?");
-                                    $stmt->execute([$track_title, $track_duration, $track_number, $track_id]);
-                                }
-                            } else {
-                                if ($has_audio_support && $has_enhanced_tables) {
-                                    $stmt = $pdo->prepare("INSERT INTO tracks (album_id, title, slug, duration, track_number, audio_file, file_size, play_type, lyrics, featured) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-                                    $stmt->execute([$album_id, $track_title, $track_slug, $track_duration, $track_number, $audio_file, $file_size, $track_play_type, $track_lyrics, $track_featured]);
-                                } else {
-                                    $stmt = $pdo->prepare("INSERT INTO tracks (album_id, title, duration, track_number) VALUES (?, ?, ?, ?)");
-                                    $stmt->execute([$album_id, $track_title, $track_duration, $track_number]);
-                                }
-                            }
+                        }
+                        
+                        if ($track_id) {
+                            // Update track
+                            $stmt = $pdo->prepare("UPDATE tracks SET title = ?, track_number = ?, audio_file = ?, file_size = ? WHERE id = ?");
+                            $stmt->execute([$track_title, $track_number, $audio_file, $file_size, $track_id]);
+                        } else {
+                            // Create track
+                            $stmt = $pdo->prepare("INSERT INTO tracks (album_id, title, track_number, audio_file, file_size) VALUES (?, ?, ?, ?, ?)");
+                            $stmt->execute([$album_id, $track_title, $track_number, $audio_file, $file_size]);
                         }
                     }
                 }
                 
-                // Handle streaming links if supported
-                if ($has_streaming_links && isset($_POST['streaming_links'])) {
-                    $stmt = $pdo->prepare("DELETE FROM album_streaming_links WHERE album_id = ?");
-                    $stmt->execute([$album_id]);
-                    
-                    $platforms = ['spotify', 'apple-music', 'youtube', 'soundcloud', 'amazon-music', 'tidal'];
-                    foreach ($platforms as $index => $platform) {
-                        $url = $_POST['streaming_links'][$platform] ?? '';
-                        $embed = $_POST['streaming_embeds'][$platform] ?? '';
-                        if (!empty($url)) {
-                            $stmt = $pdo->prepare("INSERT INTO album_streaming_links (album_id, platform, url, embed_code, display_order) VALUES (?, ?, ?, ?, ?)");
-                            $stmt->execute([$album_id, $platform, $url, $embed, $index + 1]);
-                        }
-                    }
-                }
-                
-                // Update album statistics if supported
-                if ($has_enhanced_tables) {
-                    $stmt = $pdo->prepare("UPDATE albums SET total_tracks = (SELECT COUNT(*) FROM tracks WHERE album_id = ?) WHERE id = ?");
-                    $stmt->execute([$album_id, $album_id]);
-                }
-                
-                $message = ($album_id && $_POST['album_id']) ? 'Album updated successfully!' : 'Album created successfully!';
                 $action = 'list';
+                
             } catch (Exception $e) {
                 $error = 'Failed to save album: ' . $e->getMessage();
             }
@@ -302,30 +134,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// Handle delete actions
+// Handle delete action
 if ($action === 'delete' && isset($_GET['id'])) {
     $id = $_GET['id'];
     try {
-        $stmt = $pdo->prepare("SELECT cover_image, title FROM albums WHERE id = ?");
+        $stmt = $pdo->prepare("SELECT * FROM albums WHERE id = ?");
         $stmt->execute([$id]);
         $album = $stmt->fetch();
         
         if ($album) {
-            // Get track audio files if audio support exists
-            if ($has_audio_support) {
-                $stmt = $pdo->prepare("SELECT audio_file FROM tracks WHERE album_id = ? AND audio_file IS NOT NULL");
-                $stmt->execute([$id]);
-                $tracks = $stmt->fetchAll();
-                
-                // Delete audio files
-                foreach ($tracks as $track) {
-                    if ($track['audio_file'] && file_exists('../' . ltrim($track['audio_file'], '/'))) {
-                        @unlink('../' . ltrim($track['audio_file'], '/'));
-                    }
+            // Delete tracks and files
+            $stmt = $pdo->prepare("SELECT audio_file FROM tracks WHERE album_id = ?");
+            $stmt->execute([$id]);
+            $tracks = $stmt->fetchAll();
+            
+            foreach ($tracks as $track) {
+                if ($track['audio_file'] && file_exists('../' . ltrim($track['audio_file'], '/'))) {
+                    @unlink('../' . ltrim($track['audio_file'], '/'));
                 }
             }
             
-            // Delete album (cascades to tracks and streaming links)
+            // Delete album
             $stmt = $pdo->prepare("DELETE FROM albums WHERE id = ?");
             $stmt->execute([$id]);
             
@@ -334,7 +163,7 @@ if ($action === 'delete' && isset($_GET['id'])) {
                 @unlink('../' . ltrim($album['cover_image'], '/'));
             }
             
-            $message = 'Album "' . htmlspecialchars($album['title']) . '" deleted successfully!';
+            $message = 'Album deleted successfully!';
         }
         $action = 'list';
     } catch (Exception $e) {
@@ -345,27 +174,13 @@ if ($action === 'delete' && isset($_GET['id'])) {
 // Get albums for listing
 if ($action === 'list') {
     try {
-        if ($has_audio_support) {
-            $stmt = $pdo->query("
-                SELECT a.*, 
-                       COUNT(t.id) as total_tracks,
-                       SUM(CASE WHEN t.audio_file IS NOT NULL AND t.audio_file != '' THEN 1 ELSE 0 END) as tracks_with_audio
-                FROM albums a 
-                LEFT JOIN tracks t ON a.id = t.album_id
-                GROUP BY a.id
-                ORDER BY a.created_at DESC
-            ");
-        } else {
-            $stmt = $pdo->query("
-                SELECT a.*, 
-                       COUNT(t.id) as total_tracks,
-                       0 as tracks_with_audio
-                FROM albums a 
-                LEFT JOIN tracks t ON a.id = t.album_id
-                GROUP BY a.id
-                ORDER BY a.created_at DESC
-            ");
-        }
+        $stmt = $pdo->query("
+            SELECT a.*, COUNT(t.id) as total_tracks
+            FROM albums a 
+            LEFT JOIN tracks t ON a.id = t.album_id
+            GROUP BY a.id
+            ORDER BY a.created_at DESC
+        ");
         $albums = $stmt->fetchAll();
     } catch (Exception $e) {
         $albums = [];
@@ -385,670 +200,190 @@ if ($action === 'edit' && isset($_GET['id'])) {
             $error = 'Album not found!';
             $action = 'list';
         } else {
-            // Get tracks
             $stmt = $pdo->prepare("SELECT * FROM tracks WHERE album_id = ? ORDER BY track_number, title");
             $stmt->execute([$id]);
             $edit_tracks = $stmt->fetchAll();
-            
-            // Get streaming links if supported
-            $edit_streaming_links = [];
-            if ($has_streaming_links) {
-                $stmt = $pdo->prepare("SELECT platform, url, embed_code FROM album_streaming_links WHERE album_id = ? ORDER BY display_order");
-                $stmt->execute([$id]);
-                $links = $stmt->fetchAll();
-                foreach ($links as $link) {
-                    $edit_streaming_links[$link['platform']] = [
-                        'url' => $link['url'],
-                        'embed' => $link['embed_code']
-                    ];
-                }
-            }
         }
     } catch (Exception $e) {
         $error = 'Error loading album: ' . $e->getMessage();
         $action = 'list';
     }
 }
-
-// Helper function to format file size
-function formatFileSize($bytes) {
-    if ($bytes >= 1073741824) {
-        return number_format($bytes / 1073741824, 2) . ' GB';
-    } elseif ($bytes >= 1048576) {
-        return number_format($bytes / 1048576, 2) . ' MB';
-    } elseif ($bytes >= 1024) {
-        return number_format($bytes / 1024, 2) . ' KB';
-    } else {
-        return $bytes . ' bytes';
-    }
-}
 ?>
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Albums & Music Management - Aurionix Admin</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <title>Albums - Admin</title>
     <link rel="stylesheet" href="admin-style.css">
     <style>
-        /* Enhanced Professional Styles */
-        .page-header {
-            background: linear-gradient(135deg, rgba(233, 69, 96, 0.15) 0%, rgba(255,255,255,0.05) 100%);
-            padding: 40px;
-            border-radius: 16px;
-            margin-bottom: 30px;
-            border: 1px solid rgba(233, 69, 96, 0.2);
-            position: relative;
-            overflow: hidden;
-        }
-
-        .page-header::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="grain" width="100" height="100" patternUnits="userSpaceOnUse"><circle cx="20" cy="20" r="1" fill="rgba(255,255,255,0.03)"/><circle cx="80" cy="80" r="1" fill="rgba(255,255,255,0.03)"/><circle cx="40" cy="60" r="1" fill="rgba(255,255,255,0.03)"/></pattern></defs><rect width="100" height="100" fill="url(%23grain)"/></svg>');
-            opacity: 0.5;
-            pointer-events: none;
-        }
-
-        .page-header .header-content {
-            position: relative;
-            z-index: 1;
-        }
-
-        /* Better Album Grid */
         .albums-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-            gap: 25px;
-            margin-top: 25px;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
         }
-
         .album-card {
-            background: linear-gradient(145deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.02) 100%);
-            border-radius: 20px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 10px;
             overflow: hidden;
             border: 1px solid rgba(255,255,255,0.1);
-            transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-            position: relative;
-            backdrop-filter: blur(10px);
         }
-
-        .album-card:hover {
-            transform: translateY(-8px) scale(1.02);
-            border-color: rgba(233, 69, 96, 0.4);
-            box-shadow: 
-                0 20px 40px rgba(233, 69, 96, 0.3),
-                0 0 0 1px rgba(233, 69, 96, 0.1);
-        }
-
         .album-cover {
+            width: 100%;
+            height: 200px;
+            background: #333;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             position: relative;
-            aspect-ratio: 1;
-            overflow: hidden;
         }
-
         .album-cover img {
             width: 100%;
             height: 100%;
             object-fit: cover;
-            transition: transform 0.6s ease;
         }
-
-        .album-card:hover .album-cover img {
-            transform: scale(1.1) rotate(2deg);
+        .no-cover {
+            font-size: 3rem;
+            color: rgba(255,255,255,0.3);
         }
-
-        .album-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: linear-gradient(45deg, rgba(233, 69, 96, 0.9) 0%, rgba(0,0,0,0.8) 100%);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            opacity: 0;
-            transition: all 0.3s ease;
-            backdrop-filter: blur(5px);
-        }
-
-        .album-card:hover .album-overlay {
-            opacity: 1;
-        }
-
-        .album-actions {
-            display: flex;
-            gap: 15px;
-        }
-
-        .btn-icon {
-            background: rgba(255,255,255,0.2);
-            color: white;
-            padding: 15px;
-            border-radius: 50%;
-            text-decoration: none;
-            font-size: 1.3rem;
-            transition: all 0.3s ease;
-            backdrop-filter: blur(10px);
-            border: 2px solid rgba(255,255,255,0.3);
-        }
-
-        .btn-icon:hover {
-            background: #e94560;
-            transform: scale(1.15) rotate(10deg);
-            border-color: white;
-        }
-
         .album-info {
-            padding: 25px;
+            padding: 20px;
         }
-
-        .album-badges {
+        .album-info h3 {
+            margin: 0 0 10px 0;
+            color: white;
+        }
+        .album-meta {
+            color: rgba(255,255,255,0.6);
+            font-size: 0.9rem;
+            margin: 5px 0;
+        }
+        .album-actions {
+            padding: 0 20px 20px;
             display: flex;
             gap: 10px;
-            margin-bottom: 15px;
-            flex-wrap: wrap;
         }
-
-        .badge {
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 0.75rem;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            text-decoration: none;
+            cursor: pointer;
+            font-size: 14px;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
         }
-
-        .badge-featured {
-            background: linear-gradient(45deg, #e94560, #ff6b96);
+        .btn-primary {
+            background: #e94560;
             color: white;
-            box-shadow: 0 4px 15px rgba(233, 69, 96, 0.3);
         }
-
-        .badge-full { 
-            background: linear-gradient(45deg, rgba(76, 175, 80, 0.2), rgba(76, 175, 80, 0.1)); 
-            color: #4CAF50; 
-            border: 1px solid rgba(76, 175, 80, 0.3);
+        .btn-secondary {
+            background: rgba(255,255,255,0.1);
+            color: white;
         }
-        
-        .badge-clip { 
-            background: linear-gradient(45deg, rgba(255, 152, 0, 0.2), rgba(255, 152, 0, 0.1)); 
-            color: #FF9800; 
-            border: 1px solid rgba(255, 152, 0, 0.3);
+        .btn-danger {
+            background: #dc3545;
+            color: white;
         }
-
-        .audio-stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
-            gap: 12px;
+        .form-container {
+            background: rgba(255,255,255,0.05);
+            padding: 30px;
+            border-radius: 10px;
             margin: 20px 0;
         }
-
-        .stat-item {
-            background: linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%);
-            padding: 12px;
-            border-radius: 12px;
-            border: 1px solid rgba(255,255,255,0.1);
-            text-align: center;
-            transition: all 0.3s ease;
-        }
-
-        .stat-item:hover {
-            background: linear-gradient(135deg, rgba(233, 69, 96, 0.2) 0%, rgba(233, 69, 96, 0.1) 100%);
-            border-color: rgba(233, 69, 96, 0.3);
-        }
-
-        .stat-number {
-            color: #e94560;
-            font-weight: 700;
-            font-size: 1.2rem;
-            display: block;
-        }
-
-        .stat-label {
-            font-size: 0.8rem;
-            opacity: 0.7;
-            margin-top: 2px;
-        }
-
-        /* Enhanced Form Styling */
-        .album-form-container {
-            max-width: 1400px;
-            margin: 0 auto;
-        }
-
-        .form-tabs {
-            display: flex;
-            gap: 2px;
-            margin-bottom: 30px;
-            background: rgba(255,255,255,0.05);
-            border-radius: 16px;
-            padding: 6px;
-            backdrop-filter: blur(10px);
-        }
-
-        .form-tab {
-            flex: 1;
-            padding: 16px 24px;
-            background: transparent;
-            border: none;
-            color: rgba(255,255,255,0.7);
-            cursor: pointer;
-            border-radius: 12px;
-            transition: all 0.3s ease;
-            font-weight: 600;
-            font-size: 0.95rem;
-            position: relative;
-        }
-
-        .form-tab.active {
-            background: linear-gradient(135deg, #e94560 0%, #ff6b96 100%);
-            color: white;
-            box-shadow: 0 8px 25px rgba(233, 69, 96, 0.4);
-        }
-
-        .form-tab:hover:not(.active) {
-            background: rgba(255,255,255,0.1);
-            color: rgba(255,255,255,0.9);
-        }
-
-        .form-section {
-            display: none;
-            background: linear-gradient(145deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.02) 100%);
-            border-radius: 20px;
-            padding: 40px;
-            border: 1px solid rgba(255,255,255,0.1);
-            backdrop-filter: blur(10px);
-        }
-
-        .form-section.active {
-            display: block;
-            animation: fadeInUp 0.5s ease-out;
-        }
-
-        .form-section h3 {
-            color: white;
-            margin-bottom: 10px;
-            font-size: 1.5rem;
-            font-weight: 600;
-        }
-
-        .form-section p {
-            color: rgba(255,255,255,0.7);
-            margin-bottom: 30px;
-            line-height: 1.6;
-        }
-
-        /* Better Form Grid Layout */
         .form-grid {
             display: grid;
-            grid-template-columns: 2fr 1fr;
-            gap: 40px;
-            align-items: start;
+            grid-template-columns: 1fr 300px;
+            gap: 30px;
         }
-
-        .form-left, .form-right {
-            display: flex;
-            flex-direction: column;
-            gap: 25px;
-        }
-
-        /* Enhanced Album Details Section */
-        .album-details-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 25px;
-            margin-bottom: 30px;
-        }
-
-        .details-row {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
-            align-items: end;
-        }
-
-        .form-group-enhanced {
-            background: rgba(255,255,255,0.03);
-            padding: 20px;
-            border-radius: 12px;
-            border: 1px solid rgba(255,255,255,0.1);
-            transition: all 0.3s ease;
-        }
-
-        .form-group-enhanced:hover {
-            background: rgba(255,255,255,0.05);
-            border-color: rgba(233, 69, 96, 0.3);
-        }
-
-        .form-group-enhanced .form-label {
-            color: #e94560;
-            font-weight: 600;
-            margin-bottom: 8px;
-            display: block;
-        }
-
-        /* Better Streaming Links Section */
-        .streaming-platforms-container {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-            gap: 20px;
-            margin-top: 20px;
-        }
-
-        .streaming-platform {
-            background: linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.02) 100%);
-            border-radius: 16px;
-            padding: 25px;
-            border: 1px solid rgba(255,255,255,0.1);
-            transition: all 0.3s ease;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .streaming-platform::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 4px;
-            height: 100%;
-            background: var(--platform-color, #e94560);
-            transition: width 0.3s ease;
-        }
-
-        .streaming-platform:hover::before {
-            width: 8px;
-        }
-
-        .streaming-platform:hover {
-            background: linear-gradient(135deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.06) 100%);
-            border-color: var(--platform-color, rgba(233, 69, 96, 0.3));
-            transform: translateY(-2px);
-        }
-
-        .platform-header {
-            display: flex;
-            align-items: center;
-            gap: 15px;
+        .form-group {
             margin-bottom: 20px;
         }
-
-        .platform-icon {
-            font-size: 2.5rem;
-            filter: drop-shadow(0 4px 8px rgba(0,0,0,0.3));
+        .form-label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: rgba(255,255,255,0.9);
         }
-
-        .platform-name {
-            font-size: 1.2rem;
-            font-weight: 600;
+        .form-input, .form-textarea, .form-select {
+            width: 100%;
+            padding: 12px;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 6px;
             color: white;
-            margin: 0;
+            box-sizing: border-box;
         }
-
-        .platform-fields {
-            display: grid;
-            gap: 15px;
+        .form-textarea {
+            min-height: 100px;
+            resize: vertical;
         }
-
-        /* File Upload Improvements */
         .file-upload {
-            border: 2px dashed rgba(233, 69, 96, 0.3);
-            border-radius: 16px;
-            padding: 40px;
+            border: 2px dashed rgba(255,255,255,0.3);
+            border-radius: 8px;
+            padding: 20px;
             text-align: center;
             cursor: pointer;
-            transition: all 0.3s ease;
-            background: linear-gradient(135deg, rgba(233, 69, 96, 0.05) 0%, rgba(255,255,255,0.02) 100%);
-            position: relative;
-            overflow: hidden;
+            transition: all 0.3s;
         }
-
-        .file-upload::before {
-            content: '';
-            position: absolute;
-            top: -50%;
-            left: -50%;
-            width: 200%;
-            height: 200%;
-            background: linear-gradient(45deg, transparent, rgba(233, 69, 96, 0.1), transparent);
-            transform: rotate(45deg);
-            transition: transform 0.6s ease;
-            opacity: 0;
-        }
-
-        .file-upload:hover::before {
-            opacity: 1;
-            transform: rotate(45deg) translate(50px, 50px);
-        }
-
         .file-upload:hover {
             border-color: #e94560;
-            background: linear-gradient(135deg, rgba(233, 69, 96, 0.1) 0%, rgba(255,255,255,0.05) 100%);
-            transform: scale(1.02);
         }
-
-        .file-upload-icon {
-            font-size: 3.5rem;
-            margin-bottom: 20px;
-            opacity: 0.8;
-            position: relative;
-            z-index: 1;
+        .file-upload input {
+            display: none;
         }
-
-        .file-upload-text {
-            position: relative;
-            z-index: 1;
-        }
-
-        .file-upload-text h4 {
-            color: #e94560;
+        .current-cover img {
+            max-width: 100%;
+            border-radius: 6px;
             margin-bottom: 10px;
-            font-weight: 600;
         }
-
-        .cover-preview {
-            max-width: 280px;
-            max-height: 280px;
-            border-radius: 16px;
-            margin-bottom: 20px;
-            box-shadow: 
-                0 20px 40px rgba(0,0,0,0.4),
-                0 0 0 1px rgba(255,255,255,0.1);
-            transition: all 0.3s ease;
-        }
-
-        .cover-preview:hover {
-            transform: scale(1.05) rotate(2deg);
-        }
-
-        /* Enhanced Track Management */
-        .tracks-container {
-            margin-top: 25px;
-        }
-
         .track-item {
-            background: linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.02) 100%);
-            border-radius: 16px;
-            padding: 30px;
-            margin-bottom: 25px;
-            border: 1px solid rgba(255,255,255,0.1);
-            transition: all 0.3s ease;
-            position: relative;
+            background: rgba(255,255,255,0.05);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 15px;
         }
-
-        .track-item:hover {
-            border-color: rgba(233, 69, 96, 0.3);
-            background: linear-gradient(135deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.06) 100%);
-            transform: translateY(-2px);
+        .track-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 15px;
+            margin-bottom: 15px;
         }
-
-        .track-header {
+        .alert {
+            padding: 15px;
+            border-radius: 6px;
+            margin: 20px 0;
+        }
+        .alert-success {
+            background: rgba(40, 167, 69, 0.2);
+            color: #28a745;
+            border: 1px solid #28a745;
+        }
+        .alert-error {
+            background: rgba(220, 53, 69, 0.2);
+            color: #dc3545;
+            border: 1px solid #dc3545;
+        }
+        .page-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 25px;
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
         }
-
-        .track-number {
-            background: linear-gradient(45deg, #e94560, #ff6b96);
+        .page-header h1 {
+            margin: 0;
             color: white;
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: 700;
-            margin-right: 15px;
-            box-shadow: 0 8px 20px rgba(233, 69, 96, 0.3);
         }
-
-        .track-fields {
-            display: grid;
-            grid-template-columns: 2fr 1fr 1fr;
-            gap: 20px;
-            margin-bottom: 20px;
-        }
-
-        .audio-upload-zone {
-            border: 2px dashed rgba(233, 69, 96, 0.3);
-            border-radius: 12px;
-            padding: 25px;
-            text-align: center;
-            background: rgba(233, 69, 96, 0.05);
-            margin: 20px 0;
-            transition: all 0.3s ease;
-            cursor: pointer;
-        }
-
-        .audio-upload-zone:hover {
-            border-color: #e94560;
-            background: rgba(233, 69, 96, 0.1);
-            transform: translateY(-2px);
-        }
-
-        .audio-upload-zone.has-file {
-            border-color: #4CAF50;
-            background: rgba(76, 175, 80, 0.1);
-        }
-
-        .audio-file-info {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-            padding: 20px;
-            background: rgba(76, 175, 80, 0.1);
-            border-radius: 12px;
-            margin: 15px 0;
-            border: 1px solid rgba(76, 175, 80, 0.2);
-        }
-
-        .audio-player {
-            width: 100%;
-            margin: 15px 0;
-            border-radius: 8px;
-        }
-
-        .add-track-btn {
-            background: linear-gradient(45deg, rgba(233, 69, 96, 0.2), rgba(233, 69, 96, 0.1));
-            border: 2px dashed #e94560;
-            color: #e94560;
-            padding: 25px;
-            border-radius: 16px;
-            cursor: pointer;
-            text-align: center;
-            transition: all 0.3s ease;
-            margin-top: 25px;
-            font-weight: 600;
-            font-size: 1.1rem;
-        }
-
-        .add-track-btn:hover {
-            background: linear-gradient(45deg, rgba(233, 69, 96, 0.3), rgba(233, 69, 96, 0.2));
-            transform: translateY(-3px);
-            box-shadow: 0 10px 25px rgba(233, 69, 96, 0.2);
-        }
-
-        /* Responsive Design */
         @media (max-width: 768px) {
-            .albums-grid {
-                grid-template-columns: 1fr;
-            }
-            
-            .form-grid {
-                grid-template-columns: 1fr;
-                gap: 25px;
-            }
-            
-            .album-details-grid,
-            .details-row {
-                grid-template-columns: 1fr;
-            }
-            
-            .track-fields {
-                grid-template-columns: 1fr;
-            }
-            
-            .form-tabs {
-                flex-direction: column;
-            }
-            
-            .streaming-platforms-container {
-                grid-template-columns: 1fr;
-            }
+            .albums-grid { grid-template-columns: 1fr; }
+            .form-grid { grid-template-columns: 1fr; }
+            .track-grid { grid-template-columns: 1fr; }
         }
-
-        /* Animations */
-        @keyframes fadeInUp {
-            from {
-                opacity: 0;
-                transform: translateY(30px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        .album-card {
-            animation: fadeInUp 0.5s ease-out;
-            animation-fill-mode: both;
-        }
-
-        .album-card:nth-child(1) { animation-delay: 0.1s; }
-        .album-card:nth-child(2) { animation-delay: 0.2s; }
-        .album-card:nth-child(3) { animation-delay: 0.3s; }
-        .album-card:nth-child(4) { animation-delay: 0.4s; }
-
-        /* System Status Indicators */
-        .system-status {
-            background: rgba(255,255,255,0.05);
-            padding: 15px 20px;
-            border-radius: 12px;
-            margin-bottom: 20px;
-            border: 1px solid rgba(255,255,255,0.1);
-        }
-
-        .status-item {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin: 5px 0;
-            font-size: 0.9rem;
-        }
-
-        .status-enabled { color: #4CAF50; }
-        .status-disabled { color: #ff9800; }
     </style>
 </head>
 <body>
@@ -1058,146 +393,54 @@ function formatFileSize($bytes) {
         <?php include 'includes/header.php'; ?>
         
         <div class="dashboard-content">
-            <?php if ($message): ?>
-                <div class="alert alert-success">
-                    ✅ <?= htmlspecialchars($message) ?>
-                </div>
-            <?php endif; ?>
-            
-            <?php if ($error): ?>
-                <div class="alert alert-error">
-                    ❌ <?= htmlspecialchars($error) ?>
-                </div>
-            <?php endif; ?>
-
-            <!-- System Status -->
             <?php if ($action === 'list'): ?>
-                <div class="system-status">
-                    <h4 style="margin: 0 0 10px 0; color: white;">System Features Status:</h4>
-                    <div class="status-item">
-                        <span class="<?= $has_enhanced_tables ? 'status-enabled' : 'status-disabled' ?>">
-                            <?= $has_enhanced_tables ? '✅' : '⚠️' ?>
-                        </span>
-                        Enhanced Albums (slugs, play types): <?= $has_enhanced_tables ? 'Enabled' : 'Basic Mode' ?>
-                    </div>
-                    <div class="status-item">
-                        <span class="<?= $has_audio_support ? 'status-enabled' : 'status-disabled' ?>">
-                            <?= $has_audio_support ? '✅' : '⚠️' ?>
-                        </span>
-                        Audio File Upload: <?= $has_audio_support ? 'Enabled' : 'Not Available' ?>
-                    </div>
-                    <div class="status-item">
-                        <span class="<?= $has_streaming_links ? 'status-enabled' : 'status-disabled' ?>">
-                            <?= $has_streaming_links ? '✅' : '⚠️' ?>
-                        </span>
-                        Streaming Links: <?= $has_streaming_links ? 'Enabled' : 'Not Available' ?>
-                    </div>
-                    <?php if ($database_upgraded): ?>
-                        <div class="status-item">
-                            <span class="status-enabled">✅</span>
-                            Database automatically upgraded to latest version
-                        </div>
-                    <?php endif; ?>
-                </div>
-            <?php endif; ?>
-            
-            <?php if ($action === 'list'): ?>
-                <!-- Albums List View -->
                 <div class="page-header">
-                    <div class="header-content">
-                        <div class="header-left">
-                            <h1>🎵 Music Library Management</h1>
-                            <p>Professional albums and tracks management system with advanced features and audio file support</p>
-                        </div>
-                        <div class="header-actions">
-                            <a href="?action=add" class="btn btn-primary">
-                                🎤 Create New Album
-                            </a>
-                        </div>
-                    </div>
+                    <h1>Albums</h1>
+                    <a href="?action=add" class="btn btn-primary">+ Add Album</a>
                 </div>
                 
+                <?php if ($message): ?>
+                    <div class="alert alert-success">✅ <?= htmlspecialchars($message) ?></div>
+                <?php endif; ?>
+                
+                <?php if ($error): ?>
+                    <div class="alert alert-error">❌ <?= htmlspecialchars($error) ?></div>
+                <?php endif; ?>
+                
                 <?php if (empty($albums)): ?>
-                    <div class="empty-state">
-                        <div class="empty-icon">🎵</div>
-                        <h3>No albums in your library</h3>
-                        <p>Start building your music collection by creating your first album</p>
-                        <a href="?action=add" class="btn btn-primary">Create Your First Album</a>
+                    <div class="form-container">
+                        <div style="text-align: center; padding: 50px;">
+                            <h3>No albums yet</h3>
+                            <p>Create your first album to get started!</p>
+                            <a href="?action=add" class="btn btn-primary">+ Add Album</a>
+                        </div>
                     </div>
                 <?php else: ?>
                     <div class="albums-grid">
                         <?php foreach ($albums as $album): ?>
                             <div class="album-card">
                                 <div class="album-cover">
-                                    <img src="<?= $album['cover_image'] ? '/' . ltrim($album['cover_image'], '/') : '/assets/default-cover.jpg' ?>"
-                                         alt="<?= htmlspecialchars($album['title']) ?>">
-                                    <div class="album-overlay">
-                                        <div class="album-actions">
-                                            <a href="?action=edit&id=<?= $album['id'] ?>" 
-                                               class="btn-icon" 
-                                               title="Edit Album & Tracks">✏️</a>
-                                            <?php if ($has_enhanced_tables && isset($album['slug']) && $album['slug']): ?>
-                                                <a href="/album/<?= $album['slug'] ?>" 
-                                                   class="btn-icon" 
-                                                   title="View Public Page"
-                                                   target="_blank">👁️</a>
-                                            <?php endif; ?>
-                                            <a href="?action=delete&id=<?= $album['id'] ?>" 
-                                               class="btn-icon" 
-                                               title="Delete Album"
-                                               onclick="return confirm('⚠️ PERMANENTLY DELETE \"<?= htmlspecialchars($album['title']) ?>\"?\n\nThis will delete all associated files.\n\nThis cannot be undone!')">🗑️</a>
-                                        </div>
-                                    </div>
+                                    <?php if ($album['cover_image']): ?>
+                                        <img src="<?= getImageUrl($album['cover_image']) ?>" alt="<?= htmlspecialchars($album['title']) ?>">
+                                    <?php else: ?>
+                                        <div class="no-cover">🎵</div>
+                                    <?php endif; ?>
                                 </div>
-                                
                                 <div class="album-info">
-                                    <div class="album-badges">
-                                        <?php if ($album['featured']): ?>
-                                            <span class="badge badge-featured">★ Featured</span>
-                                        <?php endif; ?>
-                                        <?php if ($has_enhanced_tables && isset($album['play_type'])): ?>
-                                            <span class="badge badge-<?= $album['play_type'] ?>">
-                                                <?= $album['play_type'] === 'full' ? '🎵 Full' : '⏯️ Clips' ?>
-                                            </span>
-                                        <?php endif; ?>
-                                    </div>
-                                    
-                                    <h3 style="margin: 0 0 15px 0; color: white; font-weight: 600;">
-                                        <?= htmlspecialchars($album['title']) ?>
-                                    </h3>
-                                    
-                                    <p style="color: rgba(255,255,255,0.7); margin: 0 0 20px 0; font-size: 0.9rem; line-height: 1.5;">
-                                        <?= htmlspecialchars(substr($album['description'], 0, 80)) ?>
-                                        <?= strlen($album['description']) > 80 ? '...' : '' ?>
-                                    </p>
-                                    
-                                    <div class="audio-stats">
-                                        <div class="stat-item">
-                                            <span class="stat-number"><?= $album['total_tracks'] ?></span>
-                                            <div class="stat-label">tracks</div>
-                                        </div>
-                                        <?php if ($has_audio_support): ?>
-                                            <div class="stat-item">
-                                                <span class="stat-number"><?= $album['tracks_with_audio'] ?></span>
-                                                <div class="stat-label">with audio</div>
-                                            </div>
-                                        <?php endif; ?>
-                                        <div class="stat-item">
-                                            <span class="stat-number"><?= date('M j', strtotime($album['release_date'])) ?></span>
-                                            <div class="stat-label"><?= date('Y', strtotime($album['release_date'])) ?></div>
-                                        </div>
-                                    </div>
-                                    
-                                    <div style="margin-top: 20px; display: flex; gap: 10px;">
-                                        <a href="?action=edit&id=<?= $album['id'] ?>" class="btn btn-sm">
-                                            ✏️ Edit
-                                        </a>
-                                        <a href="?action=delete&id=<?= $album['id'] ?>" 
-                                           class="btn btn-sm btn-danger"
-                                           onclick="return confirm('⚠️ Delete \"<?= htmlspecialchars($album['title']) ?>\"?')">
-                                            🗑️ Delete
-                                        </a>
-                                    </div>
+                                    <h3><?= htmlspecialchars($album['title']) ?></h3>
+                                    <div class="album-meta"><?= $album['total_tracks'] ?> tracks</div>
+                                    <div class="album-meta"><?= date('M j, Y', strtotime($album['release_date'])) ?></div>
+                                    <?php if ($album['featured']): ?>
+                                        <div class="album-meta" style="color: #e94560;">⭐ Featured</div>
+                                    <?php endif; ?>
+                                </div>
+                                <div class="album-actions">
+                                    <a href="?action=edit&id=<?= $album['id'] ?>" class="btn btn-secondary">✏️ Edit</a>
+                                    <a href="?action=delete&id=<?= $album['id'] ?>" 
+                                       class="btn btn-danger"
+                                       onclick="return confirm('Delete this album and all its tracks?')">
+                                        🗑️ Delete
+                                    </a>
                                 </div>
                             </div>
                         <?php endforeach; ?>
@@ -1205,495 +448,153 @@ function formatFileSize($bytes) {
                 <?php endif; ?>
                 
             <?php elseif ($action === 'add' || $action === 'edit'): ?>
-                <!-- Add/Edit Album Form -->
                 <div class="page-header">
-                    <h1>
-                        <?= $action === 'add' ? '🎤 Create New Album' : '✏️ Edit: ' . htmlspecialchars($edit_album['title'] ?? '') ?>
-                    </h1>
-                    <div style="display: flex; gap: 10px;">
-                        <a href="?action=list" class="btn btn-secondary">← Back to Albums</a>
-                        <?php if ($action === 'edit'): ?>
-                            <a href="?action=delete&id=<?= $edit_album['id'] ?>" 
-                               class="btn btn-danger"
-                               onclick="return confirm('⚠️ PERMANENTLY DELETE this album and all its files?\n\nThis cannot be undone!')">
-                                🗑️ Delete Album
-                            </a>
-                        <?php endif; ?>
-                    </div>
+                    <h1><?= $action === 'add' ? 'Add Album' : 'Edit Album' ?></h1>
+                    <a href="?action=list" class="btn btn-secondary">← Back to Albums</a>
                 </div>
                 
-                <div class="album-form-container">
-                    <form method="POST" enctype="multipart/form-data" class="admin-form">
+                <?php if ($error): ?>
+                    <div class="alert alert-error">❌ <?= htmlspecialchars($error) ?></div>
+                <?php endif; ?>
+                
+                <div class="form-container">
+                    <form method="POST" enctype="multipart/form-data">
                         <input type="hidden" name="album_id" value="<?= $edit_album['id'] ?? '' ?>">
                         
-                        <!-- Form Tabs -->
-                        <div class="form-tabs">
-                            <button type="button" class="form-tab active" onclick="switchTab('basic')">
-                                📋 Album Details
-                            </button>
-                            <button type="button" class="form-tab" onclick="switchTab('tracks')">
-                                🎵 Tracks<?= $has_audio_support ? ' & Audio' : '' ?> (<?= count($edit_tracks ?? []) ?>)
-                            </button>
-                            <?php if ($has_streaming_links): ?>
-                                <button type="button" class="form-tab" onclick="switchTab('streaming')">
-                                    🔗 Streaming Links
-                                </button>
+                        <div class="form-grid">
+                            <div>
+                                <div class="form-group">
+                                    <label class="form-label">Album Title *</label>
+                                    <input type="text" name="title" class="form-input" 
+                                           value="<?= htmlspecialchars($edit_album['title'] ?? '') ?>" required>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label class="form-label">Release Date *</label>
+                                    <input type="date" name="release_date" class="form-input" 
+                                           value="<?= $edit_album['release_date'] ?? date('Y-m-d') ?>" required>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label class="form-label">Description</label>
+                                    <textarea name="description" class="form-textarea" rows="4"><?= htmlspecialchars($edit_album['description'] ?? '') ?></textarea>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label>
+                                        <input type="checkbox" name="featured" <?= isset($edit_album) && $edit_album['featured'] ? 'checked' : '' ?>>
+                                        ⭐ Feature this album on homepage
+                                    </label>
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <div class="form-group">
+                                    <label class="form-label">Album Cover</label>
+                                    
+                                    <?php if (isset($edit_album) && $edit_album['cover_image']): ?>
+                                        <div class="current-cover">
+                                            <img src="<?= getImageUrl($edit_album['cover_image']) ?>" alt="Current cover">
+                                            <p style="color: rgba(255,255,255,0.7); margin: 10px 0;">Current cover</p>
+                                        </div>
+                                    <?php endif; ?>
+                                    
+                                    <label for="cover_image" class="file-upload">
+                                        <div style="font-size: 2rem; margin-bottom: 10px;">🖼️</div>
+                                        <h4><?= isset($edit_album) ? 'Change Cover' : 'Upload Cover' ?></h4>
+                                        <p>JPG, PNG, or WebP<br>Recommended: 1000x1000px</p>
+                                        <input type="file" id="cover_image" name="cover_image" accept="image/*">
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <h3>Album Tracks</h3>
+                        <div id="tracks-container">
+                            <?php if (isset($edit_tracks) && count($edit_tracks) > 0): ?>
+                                <?php foreach ($edit_tracks as $index => $track): ?>
+                                    <div class="track-item">
+                                        <h4>Track <?= $index + 1 ?></h4>
+                                        <input type="hidden" name="tracks[<?= $index ?>][id]" value="<?= $track['id'] ?>">
+                                        
+                                        <div class="track-grid">
+                                            <div class="form-group">
+                                                <label class="form-label">Track Title *</label>
+                                                <input type="text" name="tracks[<?= $index ?>][title]" class="form-input" 
+                                                       value="<?= htmlspecialchars($track['title']) ?>" required>
+                                            </div>
+                                            <div class="form-group">
+                                                <label class="form-label">Track Number *</label>
+                                                <input type="number" name="tracks[<?= $index ?>][track_number]" class="form-input" 
+                                                       value="<?= $track['track_number'] ?>" min="1" required>
+                                            </div>
+                                        </div>
+                                        
+                                        <div class="form-group">
+                                            <label class="form-label">Audio File</label>
+                                            <?php if (!empty($track['audio_file'])): ?>
+                                                <p style="color: #4CAF50;">✅ Current: <?= basename($track['audio_file']) ?> (<?= formatFileSize($track['file_size'] ?? 0) ?>)</p>
+                                            <?php endif; ?>
+                                            <input type="file" name="track_audio[<?= $index ?>]" class="form-input" accept="audio/*">
+                                            <small>MP3, WAV, FLAC, or M4A - Max 50MB</small>
+                                        </div>
+                                        
+                                        <button type="button" class="btn btn-danger" onclick="removeTrack(this)">Remove Track</button>
+                                    </div>
+                                <?php endforeach; ?>
                             <?php endif; ?>
                         </div>
                         
-                        <!-- Basic Album Details -->
-                        <div class="form-section active" id="basic-section">
-                            <h3>📋 Album Information</h3>
-                            <p>Enter the basic details for your album including title, description, and cover artwork.</p>
-                            
-                            <div class="form-grid">
-                                <div class="form-left">
-                                    <div class="album-details-grid">
-                                        <div class="form-group">
-                                            <label class="form-label">Album Title *</label>
-                                            <input type="text" 
-                                                   name="title" 
-                                                   class="form-input" 
-                                                   value="<?= htmlspecialchars($edit_album['title'] ?? '') ?>"
-                                                   required
-                                                   placeholder="Enter album title">
-                                        </div>
-                                        
-                                        <div class="form-group">
-                                            <label class="form-label">Release Date *</label>
-                                            <input type="date" 
-                                                   name="release_date" 
-                                                   class="form-input" 
-                                                   value="<?= $edit_album['release_date'] ?? date('Y-m-d') ?>"
-                                                   required>
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="form-group">
-                                        <label class="form-label">Description</label>
-                                        <textarea name="description" 
-                                                  class="form-textarea" 
-                                                  rows="4"
-                                                  placeholder="Describe this album, its story, inspiration..."><?= htmlspecialchars($edit_album['description'] ?? '') ?></textarea>
-                                    </div>
-                                    
-                                    <div class="details-row">
-                                        <div class="form-group-enhanced">
-                                            <label class="form-label">Album Settings</label>
-                                            <label class="form-checkbox">
-                                                <input type="checkbox" 
-                                                       name="featured"
-                                                       <?= isset($edit_album) && $edit_album['featured'] ? 'checked' : '' ?>>
-                                                <span class="checkbox-mark"></span>
-                                                ⭐ Feature this album on homepage
-                                            </label>
-                                        </div>
-                                        
-                                        <?php if ($has_enhanced_tables): ?>
-                                            <div class="form-group-enhanced">
-                                                <label class="form-label">Default Play Type</label>
-                                                <select name="play_type" class="form-select">
-                                                    <option value="full" <?= !isset($edit_album) || $edit_album['play_type'] === 'full' ? 'selected' : '' ?>>🎵 Full Tracks</option>
-                                                    <option value="clip" <?= isset($edit_album) && $edit_album['play_type'] === 'clip' ? 'selected' : '' ?>>⏯️ 30-Second Clips</option>
-                                                </select>
-                                            </div>
-                                        <?php endif; ?>
-                                    </div>
-                                </div>
-                                
-                                <div class="form-right">
-                                    <div class="form-group">
-                                        <label class="form-label">Album Cover Image</label>
-                                        
-                                        <?php if (isset($edit_album) && $edit_album['cover_image']): ?>
-                                            <div class="current-cover">
-                                                <img src="<?= htmlspecialchars('/' . ltrim($edit_album['cover_image'], '/')) ?>"
-                                                     alt="Current cover"
-                                                     class="cover-preview">
-                                                <p style="color: rgba(255,255,255,0.7); margin: 10px 0; text-align: center;">Current cover</p>
-                                            </div>
-                                        <?php endif; ?>
-                                        
-                                        <label for="cover_image" class="file-upload">
-                                            <div class="file-upload-icon">🖼️</div>
-                                            <div class="file-upload-text">
-                                                <h4><?= isset($edit_album) ? 'Change Cover Image' : 'Upload Cover Image' ?></h4>
-                                                <p>High quality JPG, PNG, or WebP<br>Recommended: 1000x1000px</p>
-                                            </div>
-                                        </label>
-                                        <input type="file" 
-                                               id="cover_image" 
-                                               name="cover_image" 
-                                               class="form-file"
-                                               accept="image/*">
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
+                        <button type="button" class="btn btn-secondary" onclick="addTrack()">+ Add Track</button>
                         
-                        <!-- Tracks Section -->
-                        <div class="form-section" id="tracks-section">
-                            <h3>🎵 Album Tracks<?= $has_audio_support ? ' & Audio Files' : '' ?></h3>
-                            <p>Add tracks to your album<?= $has_audio_support ? ' and upload high-quality audio files. Supported formats: MP3, WAV, FLAC, M4A (max 50MB each)' : '' ?>.</p>
-                            
-                            <div class="tracks-container" id="tracksContainer">
-                                <?php if (isset($edit_tracks) && !empty($edit_tracks)): ?>
-                                    <?php foreach ($edit_tracks as $index => $track): ?>
-                                        <div class="track-item">
-                                            <div class="track-header">
-                                                <div style="display: flex; align-items: center;">
-                                                    <span class="track-number"><?= $index + 1 ?></span>
-                                                    <h4 style="color: white; margin: 0;">Track <?= $index + 1 ?></h4>
-                                                </div>
-                                                <button type="button" class="remove-track" onclick="removeTrack(this)">🗑️ Remove Track</button>
-                                            </div>
-                                            
-                                            <input type="hidden" name="tracks[<?= $index ?>][track_id]" value="<?= $track['id'] ?>">
-                                            
-                                            <div class="track-fields">
-                                                <input type="text" 
-                                                       name="tracks[<?= $index ?>][title]" 
-                                                       placeholder="Track Title" 
-                                                       class="form-input"
-                                                       value="<?= htmlspecialchars($track['title']) ?>"
-                                                       required>
-                                                <input type="text" 
-                                                       name="tracks[<?= $index ?>][duration]" 
-                                                       placeholder="Duration (e.g., 3:45)" 
-                                                       class="form-input"
-                                                       value="<?= htmlspecialchars($track['duration']) ?>">
-                                                <?php if ($has_enhanced_tables): ?>
-                                                    <select name="tracks[<?= $index ?>][play_type]" class="form-select">
-                                                        <option value="full" <?= ($track['play_type'] ?? 'full') === 'full' ? 'selected' : '' ?>>🎵 Full</option>
-                                                        <option value="clip" <?= ($track['play_type'] ?? 'full') === 'clip' ? 'selected' : '' ?>>⏯️ Clip</option>
-                                                    </select>
-                                                <?php endif; ?>
-                                            </div>
-                                            
-                                            <?php if ($has_audio_support): ?>
-                                                <!-- Audio File Upload -->
-                                                <div class="audio-upload-zone <?= isset($track['audio_file']) && $track['audio_file'] ? 'has-file' : '' ?>" onclick="document.getElementById('track_audio_<?= $index ?>').click()">
-                                                    <?php if (isset($track['audio_file']) && $track['audio_file']): ?>
-                                                        <div class="audio-file-info">
-                                                            <span style="font-size: 1.5rem;">🎵</span>
-                                                            <div>
-                                                                <strong><?= basename($track['audio_file']) ?></strong>
-                                                                <br><small><?= formatFileSize($track['file_size'] ?? 0) ?></small>
-                                                                <?php if ($track['duration']): ?>
-                                                                    <br><small>Duration: <?= $track['duration'] ?></small>
-                                                                <?php endif; ?>
-                                                            </div>
-                                                        </div>
-                                                        <audio controls class="audio-player">
-                                                            <source src="/<?= ltrim($track['audio_file'], '/') ?>" type="audio/mpeg">
-                                                            Your browser does not support the audio element.
-                                                        </audio>
-                                                        <p style="color: #4CAF50; margin: 10px 0;">✅ Audio file uploaded. Click to replace with new file.</p>
-                                                    <?php else: ?>
-                                                        <div style="font-size: 2rem; margin-bottom: 10px;">🎵</div>
-                                                        <h4 style="color: #e94560; margin: 0;">Upload Audio File</h4>
-                                                        <p style="margin: 5px 0; opacity: 0.8;">Click to select MP3, WAV, FLAC, or M4A file</p>
-                                                        <small style="opacity: 0.6;">Maximum file size: 50MB</small>
-                                                    <?php endif; ?>
-                                                </div>
-                                                <input type="file" 
-                                                       id="track_audio_<?= $index ?>" 
-                                                       name="track_audio[<?= $index ?>]" 
-                                                       accept="audio/*"
-                                                       style="display: none;"
-                                                       onchange="updateAudioPreview(this, <?= $index ?>)">
-                                            <?php endif; ?>
-                                            
-                                            <?php if ($has_enhanced_tables): ?>
-                                                <div style="margin-top: 20px;">
-                                                    <textarea name="tracks[<?= $index ?>][lyrics]" 
-                                                              placeholder="Lyrics (optional)" 
-                                                              class="form-textarea" 
-                                                              rows="3"><?= htmlspecialchars($track['lyrics'] ?? '') ?></textarea>
-                                                </div>
-                                                
-                                                <label class="form-checkbox" style="margin-top: 15px;">
-                                                    <input type="checkbox" 
-                                                           name="tracks[<?= $index ?>][featured]"
-                                                           <?= ($track['featured'] ?? false) ? 'checked' : '' ?>>
-                                                    <span class="checkbox-mark"></span>
-                                                    ⭐ Feature this track
-                                                </label>
-                                            <?php endif; ?>
-                                        </div>
-                                    <?php endforeach; ?>
-                                <?php endif; ?>
-                            </div>
-                            
-                            <div class="add-track-btn" onclick="addTrack()">
-                                ➕ Add New Track
-                            </div>
-                        </div>
-                        
-                        <!-- Streaming Links Section -->
-                        <?php if ($has_streaming_links): ?>
-                            <div class="form-section" id="streaming-section">
-                                <h3>🔗 Streaming Platform Links</h3>
-                                <p>Add links to streaming platforms where this album is available. These will be displayed on the public album page and help fans discover your music.</p>
-                                
-                                <div class="streaming-platforms-container">
-                                    <?php 
-                                    $platforms = [
-                                        'spotify' => ['icon' => '🎵', 'name' => 'Spotify', 'color' => '#1DB954'],
-                                        'apple-music' => ['icon' => '🍎', 'name' => 'Apple Music', 'color' => '#FA243C'],
-                                        'youtube' => ['icon' => '📺', 'name' => 'YouTube Music', 'color' => '#FF0000'],
-                                        'soundcloud' => ['icon' => '☁️', 'name' => 'SoundCloud', 'color' => '#FF5500'],
-                                        'amazon-music' => ['icon' => '📦', 'name' => 'Amazon Music', 'color' => '#FF9900'],
-                                        'tidal' => ['icon' => '🌊', 'name' => 'Tidal', 'color' => '#000000']
-                                    ];
-                                    
-                                    foreach ($platforms as $platform => $info): 
-                                        $existing_data = $edit_streaming_links[$platform] ?? ['url' => '', 'embed' => ''];
-                                    ?>
-                                        <div class="streaming-platform" style="--platform-color: <?= $info['color'] ?>;">
-                                            <div class="platform-header">
-                                                <span class="platform-icon"><?= $info['icon'] ?></span>
-                                                <h4 class="platform-name"><?= $info['name'] ?></h4>
-                                            </div>
-                                            <div class="platform-fields">
-                                                <div>
-                                                    <label class="form-label"><?= $info['name'] ?> Album URL</label>
-                                                    <input type="url" 
-                                                           name="streaming_links[<?= $platform ?>]" 
-                                                           placeholder="https://open.spotify.com/album/..."
-                                                           value="<?= htmlspecialchars($existing_data['url']) ?>"
-                                                           class="form-input">
-                                                </div>
-                                                <div>
-                                                    <label class="form-label">Embed Code (Optional)</label>
-                                                    <textarea name="streaming_embeds[<?= $platform ?>]" 
-                                                              placeholder="&lt;iframe src=&quot;...&quot;&gt;&lt;/iframe&gt;"
-                                                              class="form-input"
-                                                              rows="3"><?= htmlspecialchars($existing_data['embed']) ?></textarea>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    <?php endforeach; ?>
-                                </div>
-                            </div>
-                        <?php endif; ?>
-                        
-                        <div class="form-actions" style="margin-top: 40px; text-align: center; padding: 40px; background: linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.02) 100%); border-radius: 20px;">
-                            <button type="submit" name="action" value="save_album" class="btn btn-primary" style="font-size: 1.2rem; padding: 18px 36px;">
+                        <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);">
+                            <button type="submit" class="btn btn-primary">
                                 <?= $action === 'add' ? '🎤 Create Album' : '💾 Save Changes' ?>
                             </button>
-                            <a href="?action=list" class="btn btn-secondary" style="margin-left: 20px;">Cancel</a>
-                            
-                            <?php if ($action === 'edit'): ?>
-                                <a href="?action=delete&id=<?= $edit_album['id'] ?>" 
-                                   class="btn btn-danger" style="margin-left: 20px;"
-                                   onclick="return confirm('⚠️ PERMANENTLY DELETE this album and all files?\n\nThis cannot be undone!')">
-                                    🗑️ Delete Album
-                                </a>
-                            <?php endif; ?>
+                            <a href="?action=list" class="btn btn-secondary" style="margin-left: 15px;">Cancel</a>
                         </div>
                     </form>
                 </div>
-                
             <?php endif; ?>
         </div>
     </div>
     
     <script>
         let trackCount = <?= isset($edit_tracks) ? count($edit_tracks) : 0 ?>;
-        const hasAudioSupport = <?= $has_audio_support ? 'true' : 'false' ?>;
-        const hasEnhancedTables = <?= $has_enhanced_tables ? 'true' : 'false' ?>;
-        
-        function switchTab(tabName) {
-            document.querySelectorAll('.form-section').forEach(section => {
-                section.classList.remove('active');
-            });
-            
-            document.querySelectorAll('.form-tab').forEach(tab => {
-                tab.classList.remove('active');
-            });
-            
-            document.getElementById(tabName + '-section').classList.add('active');
-            event.target.classList.add('active');
-        }
         
         function addTrack() {
-            const container = document.getElementById('tracksContainer');
-            const trackItem = document.createElement('div');
-            trackItem.className = 'track-item';
-            
-            let audioUploadHTML = '';
-            if (hasAudioSupport) {
-                audioUploadHTML = `
-                    <div class="audio-upload-zone" onclick="document.getElementById('track_audio_${trackCount}').click()">
-                        <div style="font-size: 2rem; margin-bottom: 10px;">🎵</div>
-                        <h4 style="color: #e94560; margin: 0;">Upload Audio File</h4>
-                        <p style="margin: 5px 0; opacity: 0.8;">Click to select MP3, WAV, FLAC, or M4A file</p>
-                        <small style="opacity: 0.6;">Maximum file size: 50MB</small>
+            const container = document.getElementById('tracks-container');
+            const trackDiv = document.createElement('div');
+            trackDiv.className = 'track-item';
+            trackDiv.innerHTML = `
+                <h4>Track ${trackCount + 1}</h4>
+                <div class="track-grid">
+                    <div class="form-group">
+                        <label class="form-label">Track Title *</label>
+                        <input type="text" name="tracks[${trackCount}][title]" class="form-input" required>
                     </div>
-                    <input type="file" 
-                           id="track_audio_${trackCount}" 
-                           name="track_audio[${trackCount}]" 
-                           accept="audio/*"
-                           style="display: none;"
-                           onchange="updateAudioPreview(this, ${trackCount})">`;
-            }
-            
-            let enhancedFieldsHTML = '';
-            if (hasEnhancedTables) {
-                enhancedFieldsHTML = `
-                    <div style="margin-top: 20px;">
-                        <textarea name="tracks[${trackCount}][lyrics]" 
-                                  placeholder="Lyrics (optional)" 
-                                  class="form-textarea" 
-                                  rows="3"></textarea>
+                    <div class="form-group">
+                        <label class="form-label">Track Number *</label>
+                        <input type="number" name="tracks[${trackCount}][track_number]" class="form-input" 
+                               value="${trackCount + 1}" min="1" required>
                     </div>
-                    <label class="form-checkbox" style="margin-top: 15px;">
-                        <input type="checkbox" name="tracks[${trackCount}][featured]">
-                        <span class="checkbox-mark"></span>
-                        ⭐ Feature this track
-                    </label>`;
-            }
-            
-            trackItem.innerHTML = `
-                <div class="track-header">
-                    <div style="display: flex; align-items: center;">
-                        <span class="track-number">${trackCount + 1}</span>
-                        <h4 style="color: white; margin: 0;">Track ${trackCount + 1}</h4>
-                    </div>
-                    <button type="button" class="remove-track" onclick="removeTrack(this)">🗑️ Remove Track</button>
                 </div>
-                
-                <div class="track-fields">
-                    <input type="text" 
-                           name="tracks[${trackCount}][title]" 
-                           placeholder="Track Title" 
-                           class="form-input"
-                           required>
-                    <input type="text" 
-                           name="tracks[${trackCount}][duration]" 
-                           placeholder="Duration (e.g., 3:45)" 
-                           class="form-input">
-                    ${hasEnhancedTables ? `
-                        <select name="tracks[${trackCount}][play_type]" class="form-select">
-                            <option value="full">🎵 Full</option>
-                            <option value="clip">⏯️ Clip</option>
-                        </select>` : ''}
+                <div class="form-group">
+                    <label class="form-label">Audio File</label>
+                    <input type="file" name="track_audio[${trackCount}]" class="form-input" accept="audio/*">
+                    <small>MP3, WAV, FLAC, or M4A - Max 50MB</small>
                 </div>
-                
-                ${audioUploadHTML}
-                ${enhancedFieldsHTML}
+                <button type="button" class="btn btn-danger" onclick="removeTrack(this)">Remove Track</button>
             `;
-            
-            container.appendChild(trackItem);
+            container.appendChild(trackDiv);
             trackCount++;
-            updateTrackNumbers();
-            
-            const tabText = hasAudioSupport ? `🎵 Tracks & Audio (${trackCount})` : `🎵 Tracks (${trackCount})`;
-            document.querySelector('.form-tab[onclick="switchTab(\'tracks\')"]').innerHTML = tabText;
         }
         
         function removeTrack(button) {
-            if (confirm('🗑️ Remove this track and its audio file?')) {
-                button.closest('.track-item').remove();
-                updateTrackNumbers();
-                trackCount = document.querySelectorAll('.track-item').length;
-                const tabText = hasAudioSupport ? `🎵 Tracks & Audio (${trackCount})` : `🎵 Tracks (${trackCount})`;
-                document.querySelector('.form-tab[onclick="switchTab(\'tracks\')"]').innerHTML = tabText;
+            if (confirm('Remove this track?')) {
+                button.parentElement.remove();
             }
         }
-        
-        function updateTrackNumbers() {
-            document.querySelectorAll('.track-item').forEach((item, index) => {
-                const numberSpan = item.querySelector('.track-number');
-                const headerText = item.querySelector('.track-header h4');
-                if (numberSpan) numberSpan.textContent = index + 1;
-                if (headerText) headerText.textContent = `Track ${index + 1}`;
-                
-                const inputs = item.querySelectorAll('input, select, textarea');
-                inputs.forEach(input => {
-                    if (input.name && input.name.includes('tracks[')) {
-                        input.name = input.name.replace(/tracks\[\d+\]/, `tracks[${index}]`);
-                    }
-                });
-                
-                const fileInput = item.querySelector('input[type="file"]');
-                if (fileInput) {
-                    fileInput.id = `track_audio_${index}`;
-                    fileInput.name = `track_audio[${index}]`;
-                }
-            });
-        }
-        
-        function updateAudioPreview(input, trackIndex) {
-            const file = input.files[0];
-            if (!file) return;
-            
-            const uploadZone = input.parentElement.querySelector('.audio-upload-zone');
-            const fileName = file.name;
-            const fileSize = (file.size / 1024 / 1024).toFixed(2) + ' MB';
-            
-            uploadZone.classList.add('has-file');
-            uploadZone.innerHTML = `
-                <div class="audio-file-info">
-                    <span style="font-size: 1.5rem;">🎵</span>
-                    <div>
-                        <strong>${fileName}</strong>
-                        <br><small>${fileSize}</small>
-                    </div>
-                </div>
-                <p style="color: #4CAF50; margin: 10px 0;">✅ Audio file selected. Click to change.</p>
-            `;
-        }
-        
-        // Cover image preview
-        document.getElementById('cover_image')?.addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            if (file) {
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    const preview = document.querySelector('.cover-preview');
-                    if (preview) {
-                        preview.src = e.target.result;
-                    } else {
-                        const currentCover = document.querySelector('.current-cover');
-                        if (currentCover) {
-                            currentCover.innerHTML = `<img src="${e.target.result}" alt="New cover" class="cover-preview"><p style="color: rgba(255,255,255,0.7); margin: 10px 0; text-align: center;">New cover (not saved yet)</p>`;
-                        } else {
-                            const formRight = document.querySelector('.form-right .form-group');
-                            const newPreview = document.createElement('div');
-                            newPreview.className = 'current-cover';
-                            newPreview.innerHTML = `<img src="${e.target.result}" alt="New cover" class="cover-preview"><p style="color: rgba(255,255,255,0.7); margin: 10px 0; text-align: center;">New cover (not saved yet)</p>`;
-                            formRight.insertBefore(newPreview, formRight.querySelector('.file-upload'));
-                        }
-                    }
-                };
-                reader.readAsDataURL(file);
-            }
-        });
-        
-        // Form validation
-        document.querySelector('form')?.addEventListener('submit', function(e) {
-            const albumTitle = document.querySelector('input[name="title"]')?.value?.trim();
-            if (!albumTitle) {
-                e.preventDefault();
-                alert('📝 Please enter an album title');
-                return;
-            }
-            
-            // Check if at least one track has a title
-            const trackTitles = document.querySelectorAll('input[name*="[title]"]');
-            let hasValidTrack = false;
-            trackTitles.forEach(input => {
-                if (input.value.trim()) hasValidTrack = true;
-            });
-            
-            if (!hasValidTrack) {
-                e.preventDefault();
-                alert('🎵 Please add at least one track to the album');
-                return;
-            }
-        });
     </script>
 </body>
 </html>

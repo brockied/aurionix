@@ -1,11 +1,90 @@
 <?php
 /**
- * ENHANCED HOMEPAGE WITH ALBUM INTEGRATION
- * Place this file as: index.php (in root directory)
+ * ENHANCED HOMEPAGE WITH TRENDING CHARTS WIDGET
+ * Fixed getSocialIcon() function and added performance tracking
  */
 
 require_once 'config.php';
+// Helper function for displaying cover images correctly
+function displayCoverImage($coverImagePath, $albumTitle = '', $size = 'medium') {
+    if (empty($coverImagePath)) {
+        // Return placeholder if no image
+        return '<div class="no-cover-placeholder">🎵</div>';
+    }
+    
+    // Clean the path
+    $imagePath = ltrim($coverImagePath, '/');
+    
+    // Ensure it starts with uploads/
+    if (!str_starts_with($imagePath, 'uploads/')) {
+        $imagePath = 'uploads/' . $imagePath;
+    }
+    
+    // Build the full URL
+    $imageUrl = '/' . $imagePath;
+    
+    // Check if file exists
+    if (!file_exists($imagePath)) {
+        return '<div class="no-cover-placeholder">🎵</div>';
+    }
+    
+    $sizeClass = 'cover-' . $size;
+    return '<img src="' . htmlspecialchars($imageUrl) . '" alt="' . htmlspecialchars($albumTitle) . '" class="' . $sizeClass . '" loading="lazy">';
+}
 
+// REPLACE YOUR ALBUM DISPLAY CODE WITH THIS:
+?>
+
+<!-- In your album grid section, replace the cover image code with: -->
+<div class="album-cover">
+    <?= displayCoverImage($album['cover_image'], $album['title'], 'large') ?>
+</div>
+
+<!-- For the audio player, replace the cover image code with: -->
+<div class="player-cover">
+    <?= displayCoverImage($currentTrack['cover_image'], $currentTrack['album_title'], 'small') ?>
+</div>
+
+<style>
+/* Add these CSS styles to your main style.css */
+.cover-small {
+    width: 60px;
+    height: 60px;
+    object-fit: cover;
+    border-radius: 6px;
+}
+
+.cover-medium {
+    width: 200px;
+    height: 200px;
+    object-fit: cover;
+    border-radius: 8px;
+}
+
+.cover-large {
+    width: 100%;
+    height: 250px;
+    object-fit: cover;
+    border-radius: 10px;
+}
+
+.no-cover-placeholder {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255,255,255,0.4);
+    font-size: 2rem;
+    border-radius: 8px;
+    width: 100%;
+    height: 100%;
+}
+
+/* Ensure images load properly */
+img[src=""], img:not([src]) {
+    display: none;
+}
+</style>
 // Get featured albums
 $stmt = $pdo->prepare("SELECT a.*, 
                           (SELECT COUNT(*) FROM tracks t WHERE t.album_id = a.id) as track_count
@@ -18,13 +97,81 @@ $featuredAlbums = $stmt->fetchAll();
 
 // Get all albums for promoted section
 $stmt = $pdo->prepare("SELECT a.*, 
-                          (SELECT COUNT(*) FROM tracks t WHERE t.album_id = a.id) as track_count,
-                          (SELECT COUNT(*) FROM album_streaming_links asl WHERE asl.album_id = a.id AND asl.is_active = 1) as streaming_links_count
+                          (SELECT COUNT(*) FROM tracks t WHERE t.album_id = a.id) as track_count
                        FROM albums a 
                        ORDER BY a.release_date DESC 
                        LIMIT 12");
 $stmt->execute();
 $allAlbums = $stmt->fetchAll();
+
+// Get trending tracks data with performance metrics
+$trendingTracks = [];
+try {
+    // Get tracks with their click data from the last 7 days vs previous 7 days
+    $stmt = $pdo->prepare("
+        SELECT 
+            t.id,
+            t.title,
+            t.album_id,
+            t.track_number,
+            a.title as album_title,
+            a.cover_image,
+            COALESCE(current_week.clicks, 0) as current_clicks,
+            COALESCE(previous_week.clicks, 0) as previous_clicks,
+            CASE 
+                WHEN COALESCE(previous_week.clicks, 0) = 0 AND COALESCE(current_week.clicks, 0) > 0 THEN 'new'
+                WHEN COALESCE(previous_week.clicks, 0) = 0 THEN 'stable'
+                WHEN COALESCE(current_week.clicks, 0) > COALESCE(previous_week.clicks, 0) THEN 'up'
+                WHEN COALESCE(current_week.clicks, 0) < COALESCE(previous_week.clicks, 0) THEN 'down'
+                ELSE 'stable'
+            END as trend,
+            CASE 
+                WHEN COALESCE(previous_week.clicks, 0) = 0 AND COALESCE(current_week.clicks, 0) > 0 THEN 100
+                WHEN COALESCE(previous_week.clicks, 0) = 0 THEN 0
+                ELSE ROUND(((COALESCE(current_week.clicks, 0) - COALESCE(previous_week.clicks, 0)) / COALESCE(previous_week.clicks, 1)) * 100, 1)
+            END as change_percent
+        FROM tracks t
+        JOIN albums a ON t.album_id = a.id
+        LEFT JOIN (
+            SELECT album_id, COUNT(*) as clicks
+            FROM streaming_clicks 
+            WHERE clicked_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+            GROUP BY album_id
+        ) current_week ON t.album_id = current_week.album_id
+        LEFT JOIN (
+            SELECT album_id, COUNT(*) as clicks
+            FROM streaming_clicks 
+            WHERE clicked_at >= DATE_SUB(CURDATE(), INTERVAL 14 DAY) 
+            AND clicked_at < DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+            GROUP BY album_id
+        ) previous_week ON t.album_id = previous_week.album_id
+        ORDER BY current_clicks DESC, t.track_number ASC
+        LIMIT 10
+    ");
+    $stmt->execute();
+    $trendingTracks = $stmt->fetchAll();
+} catch (Exception $e) {
+    // If analytics tables don't exist, fall back to recent tracks
+    $stmt = $pdo->prepare("
+        SELECT 
+            t.id,
+            t.title,
+            t.album_id,
+            t.track_number,
+            a.title as album_title,
+            a.cover_image,
+            0 as current_clicks,
+            0 as previous_clicks,
+            'stable' as trend,
+            0 as change_percent
+        FROM tracks t
+        JOIN albums a ON t.album_id = a.id
+        ORDER BY t.created_at DESC
+        LIMIT 10
+    ");
+    $stmt->execute();
+    $trendingTracks = $stmt->fetchAll();
+}
 
 // Get site settings
 $artistName = getSetting('artist_name', 'Aurionix');
@@ -46,6 +193,7 @@ $socialLinks = [
     'facebook' => getSetting('social_facebook', '')
 ];
 
+// Social icon function (FIXED)
 function getSocialIcon($platform) {
     $icons = [
         'spotify' => '🎵',
@@ -69,8 +217,26 @@ function getPlatformIcon($platform) {
     ];
     return $icons[$platform] ?? '🎵';
 }
-?>
 
+// Trend icon function for the charts widget
+function getTrendIcon($trend) {
+    switch ($trend) {
+        case 'up': return '📈';
+        case 'down': return '📉';
+        case 'new': return '🆕';
+        default: return '➖';
+    }
+}
+
+function getTrendColor($trend) {
+    switch ($trend) {
+        case 'up': return '#4CAF50';
+        case 'down': return '#f44336';
+        case 'new': return '#2196F3';
+        default: return '#757575';
+    }
+}
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -78,7 +244,7 @@ function getPlatformIcon($platform) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= htmlspecialchars($siteTitle) ?></title>
     <meta name="description" content="<?= htmlspecialchars($siteDescription) ?>">
-    <meta name="keywords" content="aurionix, electronic music, beats, producer, artist">
+    <meta name="keywords" content="music, electronic, beats, producer, <?= htmlspecialchars($artistName) ?>">
     
     <!-- Open Graph -->
     <meta property="og:title" content="<?= htmlspecialchars($siteTitle) ?>">
@@ -86,347 +252,220 @@ function getPlatformIcon($platform) {
     <meta property="og:type" content="website">
     <meta property="og:url" content="<?= SITE_URL ?>">
     
-    <!-- Favicon -->
-    <link rel="icon" type="image/x-icon" href="/assets/favicon.ico">
-    
-    <!-- Stylesheets -->
-    <link rel="stylesheet" href="/css/style.css">
+    <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     
+    <!-- Styles -->
+    <link rel="stylesheet" href="css/style.css">
+    
     <style>
-        /* Enhanced Album Cards */
-        .album-card {
-            background: rgba(255,255,255,0.03);
-            border-radius: 15px;
-            overflow: hidden;
+        /* Enhanced Charts Widget Styles */
+        .trending-charts-widget {
+            background: linear-gradient(145deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%);
+            border-radius: 20px;
+            padding: 25px;
             border: 1px solid rgba(255,255,255,0.1);
-            transition: all 0.4s ease;
-            position: relative;
+            backdrop-filter: blur(10px);
+            height: fit-content;
+            position: sticky;
+            top: 20px;
         }
 
-        .album-card:hover {
-            transform: translateY(-8px);
-            box-shadow: 0 20px 40px rgba(0,0,0,0.3);
-            border-color: rgba(233, 69, 96, 0.3);
-        }
-
-        .album-cover {
-            position: relative;
-            overflow: hidden;
-            aspect-ratio: 1;
-        }
-
-        .album-cover img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            transition: transform 0.4s ease;
-        }
-
-        .album-card:hover .album-cover img {
-            transform: scale(1.1);
-        }
-
-        .album-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0, 0, 0, 0.7);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            opacity: 0;
-            transition: opacity 0.3s ease;
-            z-index: 2;
-        }
-
-        .album-card:hover .album-overlay {
-            opacity: 1;
-        }
-
-        .main-play-btn {
-            background: linear-gradient(135deg, #e94560, #f27121);
-            border: none;
-            border-radius: 50%;
-            width: 60px;
-            height: 60px;
-            color: white;
-            font-size: 24px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            margin-bottom: 15px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .main-play-btn:hover {
-            transform: scale(1.1);
-            box-shadow: 0 10px 25px rgba(233, 69, 96, 0.4);
-        }
-
-        .album-quick-actions {
-            display: flex;
-            gap: 10px;
-        }
-
-        .quick-action-btn {
-            background: rgba(255,255,255,0.2);
-            border: none;
-            border-radius: 8px;
-            padding: 8px 12px;
-            color: white;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            font-size: 0.9rem;
-            text-decoration: none;
-        }
-
-        .quick-action-btn:hover {
-            background: rgba(255,255,255,0.3);
-        }
-
-        .album-info {
-            padding: 20px;
-        }
-
-        .album-info h3 {
-            color: white;
-            margin-bottom: 8px;
-            font-size: 1.1rem;
-        }
-
-        .album-meta {
+        .widget-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 10px;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
         }
 
-        .album-stats {
+        .widget-header h3 {
+            color: white;
+            font-size: 1.2rem;
+            font-weight: 600;
+            margin: 0;
             display: flex;
-            gap: 10px;
-        }
-
-        .stat-badge {
-            background: rgba(233, 69, 96, 0.1);
-            color: #e94560;
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-size: 0.7rem;
-            font-weight: 500;
-        }
-
-        .album-description {
-            color: rgba(255,255,255,0.7);
-            font-size: 0.9rem;
-            line-height: 1.4;
-            margin-bottom: 15px;
-        }
-
-        .album-streaming-preview {
-            display: flex;
+            align-items: center;
             gap: 8px;
-            justify-content: center;
         }
 
-        .streaming-icon {
-            width: 28px;
-            height: 28px;
-            background: rgba(255,255,255,0.1);
-            border-radius: 6px;
+        .widget-badge {
+            background: linear-gradient(45deg, #e94560, #ff6b96);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .chart-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .chart-item {
             display: flex;
             align-items: center;
-            justify-content: center;
-            font-size: 14px;
+            gap: 12px;
+            padding: 12px;
+            background: rgba(255,255,255,0.03);
+            border-radius: 12px;
             transition: all 0.3s ease;
+            cursor: pointer;
+            border: 1px solid rgba(255,255,255,0.05);
         }
 
-        .streaming-icon:hover {
-            background: #e94560;
-            transform: scale(1.1);
+        .chart-item:hover {
+            background: rgba(255,255,255,0.08);
+            border-color: rgba(233, 69, 96, 0.3);
+            transform: translateY(-1px);
         }
 
-        /* Enhanced Footer Player */
-        #nowPlaying {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            background: linear-gradient(135deg, #1a1a2e, #16213e);
-            border-top: 1px solid rgba(255,255,255,0.1);
-            padding: 15px 20px;
-            transform: translateY(100%);
-            transition: transform 0.4s ease;
-            z-index: 1000;
-            backdrop-filter: blur(10px);
-        }
-
-        #nowPlaying.active {
-            transform: translateY(0);
-        }
-
-        .now-playing-content {
-            max-width: 1400px;
-            margin: 0 auto;
+        .chart-position {
+            background: linear-gradient(45deg, #e94560, #ff6b96);
+            color: white;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
             display: flex;
             align-items: center;
-            gap: 20px;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 0.85rem;
+            flex-shrink: 0;
         }
 
-        .now-playing-left {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-            min-width: 250px;
-        }
-
-        #npCover {
-            width: 50px;
-            height: 50px;
+        .chart-cover {
+            width: 40px;
+            height: 40px;
             border-radius: 8px;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+
+        .chart-cover img {
+            width: 100%;
+            height: 100%;
             object-fit: cover;
         }
 
-        .now-playing-info h4 {
-            color: white;
-            font-size: 0.9rem;
-            margin-bottom: 2px;
+        .chart-info {
+            flex: 1;
+            min-width: 0;
         }
 
-        .now-playing-info p {
+        .chart-track {
+            color: white;
+            font-weight: 500;
+            font-size: 0.9rem;
+            margin: 0 0 2px 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .chart-album {
             color: rgba(255,255,255,0.6);
             font-size: 0.8rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
-        .now-playing-center {
-            flex: 1;
+        .chart-trend {
             display: flex;
             flex-direction: column;
-            gap: 10px;
-        }
-
-        .player-controls {
-            display: flex;
-            justify-content: center;
-            gap: 15px;
-        }
-
-        .player-controls button {
-            background: none;
-            border: none;
-            color: rgba(255,255,255,0.7);
-            cursor: pointer;
-            font-size: 18px;
-            transition: all 0.3s ease;
-            padding: 8px;
-            border-radius: 50%;
-        }
-
-        .player-controls button:hover {
-            background: rgba(255,255,255,0.1);
-            color: white;
-        }
-
-        .play-main {
-            background: #e94560 !important;
-            color: white !important;
-            width: 40px;
-            height: 40px;
-            display: flex;
             align-items: center;
-            justify-content: center;
+            gap: 2px;
+            flex-shrink: 0;
         }
 
-        .progress-container {
-            display: flex;
-            align-items: center;
-            gap: 10px;
+        .trend-icon {
+            font-size: 1.2rem;
         }
 
-        .time-current,
-        .time-total {
+        .trend-change {
+            font-size: 0.7rem;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .trend-up { color: #4CAF50; }
+        .trend-down { color: #f44336; }
+        .trend-new { color: #2196F3; }
+        .trend-stable { color: #757575; }
+
+        .chart-plays {
             font-size: 0.8rem;
-            color: rgba(255,255,255,0.6);
-            min-width: 35px;
+            color: rgba(255,255,255,0.5);
+            text-align: center;
         }
 
-        .progress-bar {
-            flex: 1;
-            height: 4px;
-            background: rgba(255,255,255,0.2);
-            border-radius: 2px;
-            overflow: hidden;
-            cursor: pointer;
+        /* Enhanced Hero Section */
+        .hero-content {
+            display: grid;
+            grid-template-columns: 1fr 350px;
+            gap: 60px;
+            align-items: start;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 20px;
         }
 
-        .progress-fill {
-            height: 100%;
-            background: linear-gradient(135deg, #e94560, #f27121);
-            width: 30%;
-            transition: width 0.1s ease;
-        }
-
-        .now-playing-right {
-            display: flex;
-            gap: 15px;
-            align-items: center;
-        }
-
-        #npClose {
-            background: none;
-            border: none;
-            color: rgba(255,255,255,0.6);
-            cursor: pointer;
-            font-size: 20px;
-            padding: 8px;
-            border-radius: 4px;
-            transition: all 0.3s ease;
-        }
-
-        #npClose:hover {
-            background: rgba(255,255,255,0.1);
-            color: white;
-        }
-
-        #embedContainer {
-            margin-top: 15px;
-            border-radius: 10px;
-            overflow: hidden;
-            max-height: 300px;
-        }
-
-        #embedContainer iframe {
-            width: 100%;
-            height: 300px;
-            border: none;
+        /* Responsive adjustments */
+        @media (max-width: 1024px) {
+            .hero-content {
+                grid-template-columns: 1fr;
+                gap: 40px;
+                text-align: center;
+            }
+            
+            .trending-charts-widget {
+                max-width: 500px;
+                margin: 0 auto;
+                position: static;
+            }
         }
 
         @media (max-width: 768px) {
-            .now-playing-content {
-                flex-direction: column;
-                gap: 15px;
+            .chart-item {
+                gap: 10px;
+                padding: 10px;
             }
             
-            .now-playing-left {
-                min-width: auto;
-                width: 100%;
-                justify-content: center;
+            .chart-cover {
+                width: 35px;
+                height: 35px;
             }
             
-            .now-playing-center {
-                width: 100%;
+            .chart-track {
+                font-size: 0.85rem;
             }
             
-            .now-playing-right {
-                width: 100%;
-                justify-content: center;
+            .chart-album {
+                font-size: 0.75rem;
             }
+        }
+
+        /* Scrollbar for chart list */
+        .chart-list::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .chart-list::-webkit-scrollbar-track {
+            background: rgba(255,255,255,0.1);
+            border-radius: 2px;
+        }
+
+        .chart-list::-webkit-scrollbar-thumb {
+            background: #e94560;
+            border-radius: 2px;
         }
     </style>
 </head>
@@ -434,27 +473,24 @@ function getPlatformIcon($platform) {
     <!-- Navigation -->
     <nav class="navbar">
         <div class="nav-container">
-            <div class="nav-logo">
-                <span class="logo-icon">🎵</span>
-                <span class="logo-text"><?= htmlspecialchars($artistName) ?></span>
+            <div class="nav-brand">
+                <a href="#home" class="brand-link">
+                    <span class="brand-icon">🎵</span>
+                    <span class="brand-text"><?= htmlspecialchars($artistName) ?></span>
+                </a>
             </div>
             
             <div class="nav-menu">
-                <a href="#home" class="nav-link active">Home</a>
-                <a href="#albums" class="nav-link">Music</a>
-                <a href="/about.php" class="nav-link">About</a>
-                <a href="/contact.php" class="nav-link">Contact</a>
-            </div>
-            
-            <div class="nav-actions">
-                <!-- Search Box -->
-                <div class="search-box">
-                    <input type="text" placeholder="Search music..." id="searchInput">
-                    <button class="search-btn" id="searchBtn">🔍</button>
-                </div>
+                <a href="#home" class="nav-link">Home</a>
+                <a href="#albums" class="nav-link">Albums</a>
+                <a href="about.php" class="nav-link">About</a>
+                <a href="contact.php" class="nav-link">Contact</a>
                 
-                <!-- Social Media Links -->
                 <div class="nav-icons">
+                    <?php if($socialLinks['spotify']): ?>
+                        <a href="<?= htmlspecialchars($socialLinks['spotify']) ?>" target="_blank" class="nav-icon" title="Spotify">🎵</a>
+                    <?php endif; ?>
+                    
                     <?php if($socialLinks['youtube']): ?>
                         <a href="<?= htmlspecialchars($socialLinks['youtube']) ?>" target="_blank" class="nav-icon" title="YouTube Channel">📺</a>
                     <?php endif; ?>
@@ -524,126 +560,136 @@ function getPlatformIcon($platform) {
             </div>
             
             <div class="hero-right">
-                <div class="top-charts-widget">
+                <!-- Trending Charts Widget -->
+                <div class="trending-charts-widget">
                     <div class="widget-header">
-                        <h3>LATEST RELEASES</h3>
-                        <select class="chart-filter" id="releaseFilter">
-                            <option>All Releases</option>
-                            <option>Featured</option>
-                            <option>Latest</option>
-                        </select>
+                        <h3>📊 Trending Now</h3>
+                        <span class="widget-badge"><?= count($trendingTracks) ?> tracks</span>
                     </div>
                     
                     <div class="chart-list">
-                        <?php foreach (array_slice($featuredAlbums, 0, 4) as $index => $album): ?>
-                        <div class="chart-item" data-album-id="<?= $album['id'] ?>">
-                            <div class="chart-position"><?= $index + 1 ?></div>
-                            <div class="chart-cover">
-                                <img src="<?= $album['cover_image'] ? '/' . ltrim($album['cover_image'], '/') : '/assets/default-cover.jpg' ?>" 
-                                     alt="<?= htmlspecialchars($album['title']) ?>">
+                        <?php if (empty($trendingTracks)): ?>
+                            <div style="text-align: center; padding: 20px; color: rgba(255,255,255,0.6);">
+                                <div style="font-size: 2rem; margin-bottom: 10px;">🎵</div>
+                                <h4 style="margin-bottom: 5px;">No tracks yet</h4>
+                                <p style="font-size: 0.9rem;">Upload some music to see trending data</p>
                             </div>
-                            <div class="chart-info">
-                                <h4><?= htmlspecialchars($album['title']) ?></h4>
-                                <p><?= htmlspecialchars($artistName) ?></p>
+                        <?php else: ?>
+                            <?php foreach ($trendingTracks as $index => $track): ?>
+                            <div class="chart-item" data-track-id="<?= $track['id'] ?>">
+                                <div class="chart-position"><?= $index + 1 ?></div>
+                                <div class="chart-cover">
+                                    <img src="<?= $track['cover_image'] ? '/' . ltrim($track['cover_image'], '/') : 'https://via.placeholder.com/40x40/1a1a2e/e94560?text=' . ($index + 1) ?>" 
+                                         alt="<?= htmlspecialchars($track['album_title']) ?>">
+                                </div>
+                                <div class="chart-info">
+                                    <h4 class="chart-track"><?= htmlspecialchars($track['title']) ?></h4>
+                                    <p class="chart-album"><?= htmlspecialchars($track['album_title']) ?></p>
+                                </div>
+                                <div class="chart-trend">
+                                    <div class="trend-icon"><?= getTrendIcon($track['trend']) ?></div>
+                                    <?php if ($track['trend'] !== 'stable'): ?>
+                                        <div class="trend-change trend-<?= $track['trend'] ?>">
+                                            <?php if ($track['trend'] === 'new'): ?>
+                                                NEW
+                                            <?php elseif ($track['change_percent'] > 0): ?>
+                                                +<?= $track['change_percent'] ?>%
+                                            <?php else: ?>
+                                                <?= $track['change_percent'] ?>%
+                                            <?php endif; ?>
+                                        </div>
+                                    <?php endif; ?>
+                                </div>
+                                <div class="chart-plays">
+                                    <?= $track['current_clicks'] ?> plays
+                                </div>
                             </div>
-                            <button class="chart-play" onclick="playAlbum(<?= $album['id'] ?>)">▶</button>
-                        </div>
-                        <?php endforeach; ?>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
                     </div>
                 </div>
             </div>
-        </div>
-    </section>
-
-    <!-- Now Playing Bar (Footer Player) -->
-    <section id="nowPlaying" class="now-playing-bar">
-        <div class="now-playing-content">
-            <div class="now-playing-left">
-                <img id="npCover" src="/assets/default-cover.jpg" alt="Now Playing">
-                <div class="now-playing-info">
-                    <h4 id="npTitle">Select a track</h4>
-                    <p id="npArtist"><?= htmlspecialchars($artistName) ?></p>
-                </div>
-            </div>
-            
-            <div class="now-playing-center">
-                <div class="player-controls">
-                    <button onclick="previousTrack()">⏮️</button>
-                    <button id="mainPlayPause" class="play-main">▶️</button>
-                    <button onclick="nextTrack()">⏭️</button>
-                </div>
-                
-                <div class="progress-container">
-                    <span class="time-current">0:00</span>
-                    <div class="progress-bar">
-                        <div class="progress-fill"></div>
-                    </div>
-                    <span class="time-total">0:00</span>
-                </div>
-            </div>
-            
-            <div class="now-playing-right">
-                <button id="npClose" title="Close player">✕</button>
-            </div>
-        </div>
-        
-        <!-- Embed Container -->
-        <div id="embedContainer">
-            <!-- Spotify/YouTube embeds will load here -->
         </div>
     </section>
 
     <!-- Featured Albums Section -->
-    <section class="featured-section" id="albums">
+    <section class="albums-section" id="albums">
         <div class="container">
             <div class="section-header">
-                <h2>MUSIC COLLECTION</h2>
-                <div class="section-filter">
-                    <select id="albumFilter">
-                        <option value="all">All Music</option>
-                        <option value="featured">Featured</option>
-                        <option value="latest">Latest Releases</option>
-                    </select>
-                </div>
+                <h2>Featured Albums</h2>
+                <p>Discover the latest releases and fan favorites</p>
             </div>
             
-            <div class="albums-grid" id="albumsGrid">
-                <?php foreach ($allAlbums as $album): ?>
-                <div class="album-card" data-album-id="<?= $album['id'] ?>" data-featured="<?= $album['featured'] ? 'true' : 'false' ?>">
-                    <div class="album-cover">
-                        <img src="<?= $album['cover_image'] ? '/' . ltrim($album['cover_image'], '/') : '/assets/default-cover.jpg' ?>" 
-                             alt="<?= htmlspecialchars($album['title']) ?>">
-                        <div class="album-overlay">
-                            <button class="main-play-btn" onclick="playAlbum(<?= $album['id'] ?>)" title="Play Album">
-                                ▶
-                            </button>
-                            <div class="album-quick-actions">
-                                <a href="/album.php?slug=<?= $album['slug'] ?>" class="quick-action-btn" title="View Tracks">
-                                    🎼 Tracks
-                                </a>
-                                <button class="quick-action-btn" onclick="shareAlbum(<?= $album['id'] ?>)" title="Share">
-                                    📤 Share
-                                </button>
+            <?php if (empty($featuredAlbums)): ?>
+                <div class="empty-state">
+                    <div class="empty-icon">🎵</div>
+                    <h3>No featured albums yet</h3>
+                    <p>Check back soon for new releases</p>
+                </div>
+            <?php else: ?>
+                <div class="albums-grid">
+                    <?php foreach ($featuredAlbums as $album): ?>
+                    <div class="album-card" data-album-id="<?= $album['id'] ?>">
+                        <div class="album-cover">
+                            <img src="<?= $album['cover_image'] ? '/' . ltrim($album['cover_image'], '/') : 'https://via.placeholder.com/300x300/1a1a2e/e94560?text=No+Cover' ?>" 
+                                 alt="<?= htmlspecialchars($album['title']) ?>">
+                            <div class="album-overlay">
+                                <div class="album-actions">
+                                    <button class="play-btn" onclick="playAlbum(<?= $album['id'] ?>)">▶️</button>
+                                    <button class="info-btn" onclick="showAlbumInfo(<?= $album['id'] ?>)">ℹ️</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="album-info">
+                            <h3><?= htmlspecialchars($album['title']) ?></h3>
+                            <p class="album-meta">
+                                <?= $album['release_date'] ? date('M Y', strtotime($album['release_date'])) : 'No Date' ?>
+                                • <?= $album['track_count'] ?> tracks
+                            </p>
+                            <?php if ($album['description']): ?>
+                                <p class="album-description"><?= strlen($album['description']) > 100 ? substr(htmlspecialchars($album['description']), 0, 100) . '...' : htmlspecialchars($album['description']) ?></p>
+                            <?php endif; ?>
+                            
+                            <div class="album-streaming-preview" id="streaming-<?= $album['id'] ?>">
+                                <!-- Streaming icons will be populated here via JavaScript -->
                             </div>
                         </div>
                     </div>
-                    
-                    <div class="album-info">
-                        <h3><?= htmlspecialchars($album['title']) ?></h3>
-                        
-                        <div class="album-meta">
-                            <span class="release-date"><?= date('M j, Y', strtotime($album['release_date'])) ?></span>
-                            <div class="album-stats">
-                                <?php if($album['featured']): ?>
-                                    <span class="stat-badge">Featured</span>
-                                <?php endif; ?>
-                                <span class="stat-badge"><?= $album['track_count'] ?> tracks</span>
-                                <span class="stat-badge"><?= ucfirst($album['play_type']) ?></span>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+        </div>
+    </section>
+
+    <!-- All Albums Section -->
+    <section class="all-albums-section">
+        <div class="container">
+            <div class="section-header">
+                <h2>All Releases</h2>
+                <p>Complete discography and catalog</p>
+            </div>
+            
+            <div class="albums-grid">
+                <?php foreach ($allAlbums as $album): ?>
+                <div class="album-card" data-album-id="<?= $album['id'] ?>">
+                    <div class="album-cover">
+                        <img src="<?= $album['cover_image'] ? '/' . ltrim($album['cover_image'], '/') : 'https://via.placeholder.com/300x300/1a1a2e/e94560?text=No+Cover' ?>" 
+                             alt="<?= htmlspecialchars($album['title']) ?>">
+                        <div class="album-overlay">
+                            <div class="album-actions">
+                                <button class="play-btn" onclick="playAlbum(<?= $album['id'] ?>)">▶️</button>
+                                <button class="info-btn" onclick="showAlbumInfo(<?= $album['id'] ?>)">ℹ️</button>
                             </div>
                         </div>
-                        
-                        <?php if($album['description']): ?>
-                            <p class="album-description"><?= htmlspecialchars(substr($album['description'], 0, 100)) ?><?= strlen($album['description']) > 100 ? '...' : '' ?></p>
+                    </div>
+                    <div class="album-info">
+                        <h3><?= htmlspecialchars($album['title']) ?></h3>
+                        <p class="album-meta">
+                            <?= $album['release_date'] ? date('M Y', strtotime($album['release_date'])) : 'No Date' ?>
+                            • <?= $album['track_count'] ?> tracks
+                        </p>
+                        <?php if ($album['description']): ?>
+                            <p class="album-description"><?= strlen($album['description']) > 100 ? substr(htmlspecialchars($album['description']), 0, 100) . '...' : htmlspecialchars($album['description']) ?></p>
                         <?php endif; ?>
                         
                         <div class="album-streaming-preview" id="streaming-<?= $album['id'] ?>">
@@ -695,230 +741,59 @@ function getPlatformIcon($platform) {
         window.SITE_CONFIG = {
             userCountry: '<?= $userCountry ?>',
             artistName: '<?= htmlspecialchars($artistName) ?>',
-            siteUrl: '<?= SITE_URL ?>',
-            socialLinks: <?= json_encode($socialLinks) ?>
+            siteUrl: '<?= SITE_URL ?>'
         };
 
-        // Enhanced search functionality
-        document.getElementById('searchInput').addEventListener('input', function(e) {
-            const query = e.target.value.toLowerCase();
-            searchAlbums(query);
-        });
-
-        document.getElementById('searchBtn').addEventListener('click', function() {
-            const query = document.getElementById('searchInput').value.toLowerCase();
-            searchAlbums(query);
-        });
-
-        function searchAlbums(query) {
-            const albums = document.querySelectorAll('.album-card');
-            let foundResults = false;
-            
-            albums.forEach(album => {
-                const title = album.querySelector('h3').textContent.toLowerCase();
-                const description = album.querySelector('.album-description')?.textContent.toLowerCase() || '';
-                
-                if (title.includes(query) || description.includes(query) || query === '') {
-                    album.style.display = 'block';
-                    if (query !== '') foundResults = true;
-                } else {
-                    album.style.display = 'none';
-                }
-            });
-            
-            // Show/hide no results message
-            let noResultsMsg = document.getElementById('noResultsMessage');
-            if (!foundResults && query !== '') {
-                if (!noResultsMsg) {
-                    noResultsMsg = document.createElement('div');
-                    noResultsMsg.id = 'noResultsMessage';
-                    noResultsMsg.className = 'no-results';
-                    noResultsMsg.innerHTML = `
-                        <div class="empty-state">
-                            <div class="empty-icon">🔍</div>
-                            <h3>No albums found</h3>
-                            <p>Try adjusting your search terms</p>
-                        </div>
-                    `;
-                    document.querySelector('.albums-grid').appendChild(noResultsMsg);
-                }
-                noResultsMsg.style.display = 'block';
-            } else if (noResultsMsg) {
-                noResultsMsg.style.display = 'none';
-            }
-        }
-
-        // Album filtering
-        document.getElementById('albumFilter').addEventListener('change', function() {
-            const filter = this.value;
-            const albums = document.querySelectorAll('.album-card');
-            
-            albums.forEach(album => {
-                const isFeatured = album.dataset.featured === 'true';
-                
-                switch(filter) {
-                    case 'featured':
-                        album.style.display = isFeatured ? 'block' : 'none';
-                        break;
-                    case 'latest':
-                        const index = Array.from(albums).indexOf(album);
-                        album.style.display = index < 6 ? 'block' : 'none';
-                        break;
-                    case 'all':
-                    default:
-                        album.style.display = 'block';
-                        break;
-                }
-            });
-        });
-
-        // Enhanced album play functionality
+        // Enhanced functionality
         function playAlbum(albumId) {
             console.log('Playing album:', albumId);
-            
-            // Show the footer audio player
-            showFooterPlayer(albumId);
-            
-            // Fetch streaming links and play
-            fetch(`/api/get-streaming-links.php?album_id=${albumId}`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success && data.links.length > 0) {
-                        // Find Spotify link with embed first
-                        const spotifyLink = data.links.find(link => link.platform === 'spotify' && link.embed_code);
-                        
-                        if (spotifyLink && spotifyLink.embed_code) {
-                            // Show Spotify embed in footer player
-                            showEmbedInFooter(spotifyLink.embed_code);
-                        } else {
-                            // Fallback to first available link
-                            const preferredLink = data.links[0];
-                            window.open(preferredLink.url, '_blank');
-                        }
-                        
-                        // Log the click for analytics
-                        logStreamingClick(albumId, spotifyLink?.platform || data.links[0].platform);
-                    } else {
-                        alert('No streaming links available for this album.');
-                    }
-                })
-                .catch(e => {
-                    console.error('Failed to load streaming links:', e);
-                    alert('Unable to play album. Please try again.');
-                });
+            // Add your streaming/audio player logic here
         }
 
-        // Show footer audio player
-        function showFooterPlayer(albumId) {
-            const footerPlayer = document.getElementById('nowPlaying');
-            if (footerPlayer) {
-                footerPlayer.classList.add('active');
-                
-                // Update footer player with album info
-                fetch(`/api/get-album-info.php?id=${albumId}`)
-                    .then(response => response.json())
-                    .then(album => {
-                        if (album.success) {
-                            document.getElementById('npTitle').textContent = album.data.title;
-                            document.getElementById('npArtist').textContent = '<?= htmlspecialchars($artistName) ?>';
-                            document.getElementById('npCover').src = album.data.cover_image ? '/' + album.data.cover_image : '/assets/default-cover.jpg';
-                        }
-                    });
-            }
+        function showAlbumInfo(albumId) {
+            console.log('Showing info for album:', albumId);
+            // Add album details modal logic here
         }
 
-        // Show embed in footer player
-        function showEmbedInFooter(embedCode) {
-            const embedContainer = document.getElementById('embedContainer');
-            if (embedContainer) {
-                embedContainer.innerHTML = embedCode;
-            }
-        }
-
-        // Log streaming clicks for analytics
-        function logStreamingClick(albumId, platform) {
-            fetch('/api/log-click.php', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    album_id: albumId,
-                    platform: platform,
-                    timestamp: new Date().toISOString()
-                })
-            }).catch(e => console.log('Analytics logging failed:', e));
-        }
-
-        // Share album function
-        function shareAlbum(albumId) {
-            const albumCard = document.querySelector(`[data-album-id="${albumId}"]`);
-            const albumTitle = albumCard.querySelector('h3').textContent;
-            
-            if (navigator.share) {
-                navigator.share({
-                    title: albumTitle,
-                    text: `Check out "${albumTitle}" by <?= htmlspecialchars($artistName) ?>`,
-                    url: window.location.href
-                });
-            } else {
-                // Fallback - copy to clipboard
-                navigator.clipboard.writeText(window.location.href);
-                alert('Link copied to clipboard!');
-            }
-        }
-
-        // Placeholder functions for audio controls
-        function previousTrack() {
-            console.log('Previous track');
-        }
-
-        function nextTrack() {
-            console.log('Next track');
-        }
-
-        // Close now playing bar
-        document.getElementById('npClose').addEventListener('click', function() {
-            document.getElementById('nowPlaying').classList.remove('active');
+        // Track clicks on chart items
+        document.querySelectorAll('.chart-item').forEach(item => {
+            item.addEventListener('click', function() {
+                const trackId = this.dataset.trackId;
+                console.log('Chart item clicked:', trackId);
+                // Add track interaction logic here
+            });
         });
 
-        // Load streaming links for albums dynamically
-        document.addEventListener('DOMContentLoaded', function() {
-            const albums = document.querySelectorAll('.album-card');
-            
-            albums.forEach(album => {
-                const albumId = album.dataset.albumId;
-                const streamingContainer = album.querySelector('.album-streaming-preview');
-                
-                if (streamingContainer) {
-                    fetch(`/api/get-streaming-links.php?album_id=${albumId}`)
-                        .then(response => response.json())
-                        .then(data => {
-                            if (data.success && data.links.length > 0) {
-                                const iconsHTML = data.links.slice(0, 4).map(link => 
-                                    `<span class="streaming-icon" title="${link.platform}">
-                                        ${getPlatformIcon(link.platform)}
-                                    </span>`
-                                ).join('');
-                                streamingContainer.innerHTML = iconsHTML;
-                            }
-                        })
-                        .catch(e => console.log('Failed to load streaming links for album', albumId));
+        // Mobile menu toggle
+        document.querySelector('.mobile-menu-toggle').addEventListener('click', function() {
+            document.querySelector('.nav-menu').classList.toggle('active');
+        });
+
+        // Smooth scrolling for navigation links
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'start'
+                    });
                 }
             });
         });
 
-        function getPlatformIcon(platform) {
-            const icons = {
-                'spotify': '🎵',
-                'apple-music': '🍎',
-                'youtube': '📺',
-                'soundcloud': '☁️',
-                'amazon-music': '📦',
-                'tidal': '🌊'
-            };
-            return icons[platform] || '🎵';
-        }
+        // Navbar background on scroll
+        window.addEventListener('scroll', function() {
+            const navbar = document.querySelector('.navbar');
+            if (window.scrollY > 100) {
+                navbar.style.background = 'rgba(10, 10, 10, 0.98)';
+            } else {
+                navbar.style.background = 'rgba(10, 10, 10, 0.95)';
+            }
+        });
+
+        console.log('Aurionix homepage loaded successfully! 🎵');
     </script>
 </body>
 </html>

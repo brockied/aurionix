@@ -57,3 +57,31 @@ Stack trace:
 [20-Aug-2025 22:54:15 UTC] PHP Fatal error:  Cannot redeclare function generateSlug() (previously declared in /home/aurioni1/public_html/admin/albums.php:26) in /home/aurioni1/public_html/config.php on line 140
 [20-Aug-2025 22:56:07 UTC] PHP Fatal error:  Cannot redeclare function generateSlug() (previously declared in /home/aurioni1/public_html/admin/albums.php:126) in /home/aurioni1/public_html/config.php on line 140
 [21-Aug-2025 08:25:09 UTC] Login error: SQLSTATE[42S22]: Column not found: 1054 Unknown column 'last_login' in 'SET'
+[21-Aug-2025 10:09:40 UTC] Settings table creation failed: SQLSTATE[42S22]: Column not found: 1054 Unknown column 'name' in 'INSERT INTO'
+[21-Aug-2025 10:09:40 UTC] PHP Fatal error:  Uncaught Error: Call to undefined function isLoggedIn() in /home/aurioni1/public_html/admin/login.php:11
+Stack trace:
+#0 {main}
+  thrown in /home/aurioni1/public_html/admin/login.php on line 11
+[21-Aug-2025 10:10:00 UTC] Settings table creation failed: SQLSTATE[42S22]: Column not found: 1054 Unknown column 'name' in 'INSERT INTO'
+[21-Aug-2025 10:10:00 UTC] PHP Fatal error:  Uncaught Error: Call to undefined function isLoggedIn() in /home/aurioni1/public_html/admin/login.php:11
+Stack trace:
+#0 {main}
+  thrown in /home/aurioni1/public_html/admin/login.php on line 11
+[21-Aug-2025 10:14:35 UTC] Settings table creation failed: SQLSTATE[42S22]: Column not found: 1054 Unknown column 'name' in 'INSERT INTO'
+[21-Aug-2025 10:14:35 UTC] PHP Fatal error:  Uncaught Error: Call to undefined function isLoggedIn() in /home/aurioni1/public_html/admin/login.php:11
+Stack trace:
+#0 {main}
+  thrown in /home/aurioni1/public_html/admin/login.php on line 11
+[21-Aug-2025 10:17:07 UTC] Login error: SQLSTATE[42S22]: Column not found: 1054 Unknown column 'last_login' in 'SET'
+[21-Aug-2025 19:44:45 UTC] Login error: SQLSTATE[42S22]: Column not found: 1054 Unknown column 'last_login' in 'SET'
+[21-Aug-2025 19:55:02 UTC] PHP Fatal error:  Cannot redeclare function generateSlug() (previously declared in /home/aurioni1/public_html/config.php:25) in /home/aurioni1/public_html/config.php on line 260
+[21-Aug-2025 19:55:20 UTC] PHP Fatal error:  Cannot redeclare function generateSlug() (previously declared in /home/aurioni1/public_html/config.php:89) in /home/aurioni1/public_html/config.php on line 130
+[21-Aug-2025 19:55:21 UTC] PHP Fatal error:  Cannot redeclare function generateSlug() (previously declared in /home/aurioni1/public_html/config.php:89) in /home/aurioni1/public_html/config.php on line 130
+[21-Aug-2025 19:55:21 UTC] PHP Fatal error:  Cannot redeclare function generateSlug() (previously declared in /home/aurioni1/public_html/config.php:89) in /home/aurioni1/public_html/config.php on line 130
+[21-Aug-2025 19:56:09 UTC] PHP Fatal error:  Cannot redeclare function generateSlug() (previously declared in /home/aurioni1/public_html/config.php:89) in /home/aurioni1/public_html/config.php on line 128
+[21-Aug-2025 19:56:09 UTC] PHP Fatal error:  Cannot redeclare function generateSlug() (previously declared in /home/aurioni1/public_html/config.php:89) in /home/aurioni1/public_html/config.php on line 128
+[21-Aug-2025 19:56:10 UTC] PHP Fatal error:  Cannot redeclare function generateSlug() (previously declared in /home/aurioni1/public_html/config.php:89) in /home/aurioni1/public_html/config.php on line 128
+[21-Aug-2025 19:59:17 UTC] PHP Fatal error:  Uncaught Error: Call to undefined function formatFileSize() in /home/aurioni1/public_html/admin/albums.php:736
+Stack trace:
+#0 {main}
+  thrown in /home/aurioni1/public_html/admin/albums.php on line 736
