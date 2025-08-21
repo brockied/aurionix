@@ -59,8 +59,6 @@ function getSocialIcon($platform) {
                 <a href="/contact.php" class="nav-link active">Contact</a>
             </div>
             <div class="nav-actions">
-                <!-- Preserve the same structure as the homepage header for alignment -->
-                <div class="search-box" style="display:none;"></div>
                 <div class="nav-icons">
                     <?php foreach ($socialLinks as $platform => $url): ?>
                         <?php if ($url): ?>

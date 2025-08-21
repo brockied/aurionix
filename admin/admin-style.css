@@ -893,13 +893,3 @@ body {
     text-align: center;
     margin: 0;
 }
-
-/* Action row on album cards (admin grid view) */
-.album-actions-row {
-    margin-top: 8px;
-    display: flex;
-    gap: 10px;
-}
-.album-actions-row .btn-icon {
-    font-size: 1.1rem;
-}

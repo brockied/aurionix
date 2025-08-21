@@ -1,120 +1,365 @@
 <?php
 /**
- * INDIVIDUAL ALBUM PAGE
- *
- * This page displays details for a single album, including its cover
- * artwork, description, release information, track listing and available
- * streaming platforms.  Visitors can click on a platform icon to either
- * open the album on that service in a new tab or, if an embed code is
- * provided, load the embedded player directly on the page.  The design
- * borrows from the main site to maintain a cohesive aesthetic.
+ * PUBLIC ALBUM VIEWING PAGE
+ * Place this file as: album.php (in root directory)
  */
 
 require_once 'config.php';
 
-// Fetch album ID from query string
-$albumId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
-if (!$albumId) {
-    // Invalid or missing album ID
-    http_response_code(404);
-    echo '<p style="color:white;text-align:center;padding:50px;">Album not found.</p>';
+// Get album slug from URL
+$slug = $_GET['slug'] ?? '';
+
+if (empty($slug)) {
+    header('HTTP/1.0 404 Not Found');
+    include '404.php';
     exit;
 }
 
-// Fetch album details
-$stmt = $pdo->prepare('SELECT * FROM albums WHERE id = ?');
-$stmt->execute([$albumId]);
+// Get album details
+$stmt = $pdo->prepare("SELECT * FROM albums WHERE slug = ?");
+$stmt->execute([$slug]);
 $album = $stmt->fetch();
+
 if (!$album) {
-    http_response_code(404);
-    echo '<p style="color:white;text-align:center;padding:50px;">Album not found.</p>';
+    header('HTTP/1.0 404 Not Found');
+    include '404.php';
     exit;
 }
 
-// Fetch tracks for this album
-$stmt = $pdo->prepare('SELECT * FROM tracks WHERE album_id = ? ORDER BY track_number, id');
-$stmt->execute([$albumId]);
+// Get tracks for this album
+$stmt = $pdo->prepare("SELECT * FROM tracks WHERE album_id = ? ORDER BY track_number, title");
+$stmt->execute([$album['id']]);
 $tracks = $stmt->fetchAll();
 
-// Fetch streaming links.  We prioritise country‑specific links if available.
-$country = getUserCountry();
-$stmt = $pdo->prepare('SELECT * FROM streaming_links WHERE album_id = ? AND (country_code = ? OR country_code = "global") ORDER BY country_code = ? DESC, platform');
-$stmt->execute([$albumId, $country, $country]);
-$linksRaw = $stmt->fetchAll();
+// Get album streaming links
+$stmt = $pdo->prepare("SELECT platform, url, embed_code FROM album_streaming_links WHERE album_id = ? AND is_active = 1 ORDER BY display_order");
+$stmt->execute([$album['id']]);
+$album_streaming_links = $stmt->fetchAll();
 
-// Group links by platform, preferring the country‑specific variant
-$streamingLinks = [];
-foreach ($linksRaw as $link) {
-    $platform = $link['platform'];
-    if (!isset($streamingLinks[$platform]) || $link['country_code'] === $country) {
-        $streamingLinks[$platform] = $link;
+// Get track streaming links for all tracks
+$track_streaming_links = [];
+if (!empty($tracks)) {
+    $track_ids = array_column($tracks, 'id');
+    $placeholders = str_repeat('?,', count($track_ids) - 1) . '?';
+    $stmt = $pdo->prepare("SELECT track_id, platform, url FROM track_streaming_links WHERE track_id IN ($placeholders) AND is_active = 1 ORDER BY display_order");
+    $stmt->execute($track_ids);
+    $links = $stmt->fetchAll();
+    
+    foreach ($links as $link) {
+        $track_streaming_links[$link['track_id']][$link['platform']] = $link['url'];
     }
 }
 
-// Determine an initial embed code if available
-$initialEmbed = '';
-foreach ($streamingLinks as $link) {
-    if (!empty($link['embed_code'])) {
-        $initialEmbed = $link['embed_code'];
-        break;
-    }
-}
+// Get site settings
+$artistName = getSetting('artist_name', 'Aurionix');
+$siteTitle = getSetting('site_title', 'Aurionix - Official Music');
 
-// Helper functions from index.php reused here
-function getIconForPlatform($platform) {
-    $icons = [
-        'spotify'      => '🎵',
-        'apple-music'  => '🍎',
-        'youtube'      => '📺',
-        'youtube-video'=> '📹',
-        'soundcloud'   => '☁️',
-        'amazon-music' => '📦',
-        'tidal'        => '🌊',
-        'deezer'       => '🎧',
-        'bandcamp'     => '💿',
-        'itunes'       => '🎶'
-    ];
-    return $icons[$platform] ?? '🎵';
-}
+// Get social media links
+$socialLinks = [
+    'spotify' => getSetting('social_spotify', ''),
+    'youtube' => getSetting('social_youtube', ''),
+    'soundcloud' => getSetting('social_soundcloud', ''),
+    'instagram' => getSetting('social_instagram', ''),
+    'twitter' => getSetting('social_twitter', ''),
+    'facebook' => getSetting('social_facebook', '')
+];
 
 function getSocialIcon($platform) {
     $icons = [
-        'spotify'    => '🎵',
-        'youtube'    => '📺',
+        'spotify' => '🎵',
+        'youtube' => '📺',
         'soundcloud' => '☁️',
-        'instagram'  => '📷',
-        'twitter'    => '🐦',
-        'facebook'   => '📘'
+        'instagram' => '📷',
+        'twitter' => '🐦',
+        'facebook' => '📘'
     ];
     return $icons[$platform] ?? '🔗';
 }
 
-// Fetch site settings for nav
-$artistName    = getSetting('artist_name', 'Aurionix');
-$siteTitle     = getSetting('site_title', 'Aurionix - Official Music');
-$socialLinks   = [
-    'spotify'    => getSetting('social_spotify', ''),
-    'youtube'    => getSetting('social_youtube', ''),
-    'soundcloud' => getSetting('social_soundcloud', ''),
-    'instagram'  => getSetting('social_instagram', ''),
-    'twitter'    => getSetting('social_twitter', ''),
-    'facebook'   => getSetting('social_facebook', '')
-];
+function getPlatformIcon($platform) {
+    $icons = [
+        'spotify' => '🎵',
+        'apple-music' => '🍎',
+        'youtube' => '📺',
+        'soundcloud' => '☁️',
+        'amazon-music' => '📦',
+        'tidal' => '🌊'
+    ];
+    return $icons[$platform] ?? '🎵';
+}
+?>
 
-?><!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= htmlspecialchars($album['title']) ?> – <?= htmlspecialchars($artistName) ?></title>
-    <meta name="description" content="Listen to <?= htmlspecialchars($album['title']) ?> by <?= htmlspecialchars($artistName) ?>">
+    <meta name="description" content="Listen to <?= htmlspecialchars($album['title']) ?> by <?= htmlspecialchars($artistName) ?>. <?= htmlspecialchars($album['description']) ?>">
+    
+    <!-- Open Graph -->
+    <meta property="og:title" content="<?= htmlspecialchars($album['title']) ?> – <?= htmlspecialchars($artistName) ?>">
+    <meta property="og:description" content="<?= htmlspecialchars($album['description']) ?>">
+    <meta property="og:image" content="<?= SITE_URL ?>/<?= ltrim($album['cover_image'], '/') ?>">
+    <meta property="og:type" content="music.album">
+    
+    <!-- Stylesheets -->
     <link rel="stylesheet" href="/css/style.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        .album-hero {
+            padding: 100px 0 60px;
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .album-hero::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: url('<?= $album['cover_image'] ? '/' . ltrim($album['cover_image'], '/') : '/assets/default-cover.jpg' ?>') center/cover;
+            opacity: 0.1;
+            filter: blur(10px);
+            z-index: 1;
+        }
+        
+        .album-hero-content {
+            position: relative;
+            z-index: 2;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+            display: grid;
+            grid-template-columns: 300px 1fr;
+            gap: 60px;
+            align-items: center;
+        }
+        
+        .album-artwork {
+            width: 100%;
+            max-width: 300px;
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 25px 50px rgba(0,0,0,0.5);
+            transition: transform 0.3s ease;
+        }
+        
+        .album-artwork:hover {
+            transform: scale(1.05);
+        }
+        
+        .album-artwork img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        .album-details h1 {
+            font-size: 3rem;
+            margin-bottom: 10px;
+            background: linear-gradient(135deg, #e94560, #f27121);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .album-details .artist-name {
+            font-size: 1.5rem;
+            color: rgba(255,255,255,0.8);
+            margin-bottom: 20px;
+        }
+        
+        .album-meta {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .meta-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: rgba(255,255,255,0.6);
+            font-size: 0.9rem;
+        }
+        
+        .album-description {
+            color: rgba(255,255,255,0.8);
+            line-height: 1.6;
+            margin-bottom: 30px;
+        }
+        
+        .album-streaming-links {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .album-streaming-btn {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 20px;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 8px;
+            text-decoration: none;
+            color: white;
+            transition: all 0.3s ease;
+            font-weight: 500;
+        }
+        
+        .album-streaming-btn:hover {
+            background: #e94560;
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(233, 69, 96, 0.3);
+        }
+        
+        .tracks-section {
+            padding: 60px 0;
+            background: rgba(255,255,255,0.02);
+        }
+        
+        .tracks-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+        
+        .tracks-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 40px;
+        }
+        
+        .tracks-header h2 {
+            color: #e94560;
+            font-size: 2rem;
+        }
+        
+        .play-all-btn {
+            background: linear-gradient(135deg, #e94560, #f27121);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .play-all-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(233, 69, 96, 0.3);
+        }
+        
+        .tracks-list {
+            background: rgba(255,255,255,0.03);
+            border-radius: 15px;
+            padding: 30px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .track-item {
+            display: grid;
+            grid-template-columns: 40px 1fr auto auto;
+            gap: 20px;
+            align-items: center;
+            padding: 15px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            transition: all 0.3s ease;
+        }
+        
+        .track-item:last-child {
+            border-bottom: none;
+        }
+        
+        .track-item:hover {
+            background: rgba(255,255,255,0.03);
+            margin: 0 -15px;
+            padding-left: 15px;
+            padding-right: 15px;
+            border-radius: 8px;
+        }
+        
+        .track-number {
+            color: rgba(255,255,255,0.5);
+            font-weight: 600;
+            text-align: center;
+        }
+        
+        .track-info h3 {
+            color: white;
+            margin-bottom: 5px;
+        }
+        
+        .track-duration {
+            color: rgba(255,255,255,0.5);
+            font-family: 'Courier New', monospace;
+        }
+        
+        .track-streaming-links {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .track-streaming-link {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 16px;
+            transition: all 0.3s ease;
+        }
+        
+        .track-streaming-link:hover {
+            background: #e94560;
+            transform: scale(1.1);
+        }
+        
+        @media (max-width: 768px) {
+            .album-hero-content {
+                grid-template-columns: 1fr;
+                text-align: center;
+                gap: 30px;
+            }
+            
+            .album-details h1 {
+                font-size: 2rem;
+            }
+            
+            .track-item {
+                grid-template-columns: 30px 1fr auto;
+                gap: 15px;
+            }
+            
+            .track-duration {
+                display: none;
+            }
+            
+            .track-streaming-links {
+                grid-column: 1 / -1;
+                margin-top: 10px;
+                justify-content: center;
+            }
+        }
+    </style>
 </head>
 <body>
-    <!-- Navigation (similar to homepage) -->
+    <!-- Navigation (same as homepage) -->
     <nav class="navbar">
         <div class="nav-container">
             <div class="nav-logo">
@@ -124,8 +369,8 @@ $socialLinks   = [
             <div class="nav-menu">
                 <a href="/" class="nav-link">Home</a>
                 <a href="/#albums" class="nav-link">Music</a>
-                <a href="/#about" class="nav-link">About</a>
-                <a href="/#contact" class="nav-link">Contact</a>
+                <a href="/about.php" class="nav-link">About</a>
+                <a href="/contact.php" class="nav-link">Contact</a>
             </div>
             <div class="nav-actions">
                 <div class="nav-icons">
@@ -144,107 +389,245 @@ $socialLinks   = [
         </div>
     </nav>
 
-    <!-- Album hero section -->
-    <section class="album-hero" style="position: relative; padding: 80px 0; background: url('<?= $album['cover_image'] ? '/' . $album['cover_image'] : '/assets/default-cover.jpg' ?>') center/cover no-repeat;">
-        <div style="position:absolute; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.6);"></div>
-        <div class="container" style="position: relative; z-index: 2; display:flex; align-items:center; justify-content: center; flex-direction: column; text-align:center;">
-            <h1 style="font-size:2.5rem; color:white; margin-bottom:10px;"><?= htmlspecialchars($album['title']) ?></h1>
-            <p style="color:rgba(255,255,255,0.8); margin-bottom:15px;">
-                Released <?= date('F j, Y', strtotime($album['release_date'])) ?>
-            </p>
-            <?php if ($album['featured']): ?>
-                <span style="background:#e94560; color:white; padding:5px 10px; border-radius:5px; font-size:0.8rem;">Featured</span>
-            <?php endif; ?>
-        </div>
-    </section>
-
-    <!-- Album details -->
-    <section class="album-details" style="padding:40px 20px;">
-        <div class="container" style="max-width:800px; margin:0 auto; color:rgba(255,255,255,0.9);">
-            <?php if ($album['description']): ?>
-                <p style="margin-bottom:30px; line-height:1.6;"><?= nl2br(htmlspecialchars($album['description'])) ?></p>
-            <?php endif; ?>
-
-            <!-- Streaming options -->
-            <?php if (!empty($streamingLinks)): ?>
-                <div class="streaming-options" style="margin-bottom:30px;">
-                    <h3 style="margin-bottom:10px;">Listen on your favourite platform:</h3>
-                    <div class="platform-links" style="display:flex; flex-wrap:wrap; gap:15px;">
-                        <?php foreach ($streamingLinks as $platform => $link): ?>
-                            <a href="<?= htmlspecialchars($link['url']) ?>" class="platform-link" data-embed="<?= htmlspecialchars($link['embed_code']) ?>" target="_blank" style="display:flex; align-items:center; gap:8px; background:rgba(255,255,255,0.1); padding:10px 15px; border-radius:8px; color:white; text-decoration:none; font-size:0.9rem;">
-                                <span><?= getIconForPlatform($platform) ?></span>
-                                <span><?= ucfirst(str_replace('-', ' ', $platform)) ?></span>
+    <!-- Album Hero Section -->
+    <section class="album-hero">
+        <div class="album-hero-content">
+            <div class="album-artwork">
+                <img src="<?= $album['cover_image'] ? '/' . ltrim($album['cover_image'], '/') : '/assets/default-cover.jpg' ?>" 
+                     alt="<?= htmlspecialchars($album['title']) ?>">
+            </div>
+            
+            <div class="album-details">
+                <h1><?= htmlspecialchars($album['title']) ?></h1>
+                <div class="artist-name">by <?= htmlspecialchars($artistName) ?></div>
+                
+                <div class="album-meta">
+                    <div class="meta-item">
+                        <span>📅</span>
+                        <span><?= date('F j, Y', strtotime($album['release_date'])) ?></span>
+                    </div>
+                    <?php if ($album['total_tracks']): ?>
+                        <div class="meta-item">
+                            <span>🎼</span>
+                            <span><?= $album['total_tracks'] ?> tracks</span>
+                        </div>
+                    <?php endif; ?>
+                    <div class="meta-item">
+                        <span><?= $album['play_type'] === 'clip' ? '🎵' : '▶️' ?></span>
+                        <span><?= $album['play_type'] === 'clip' ? 'Preview Mode' : 'Full Tracks' ?></span>
+                    </div>
+                </div>
+                
+                <?php if ($album['description']): ?>
+                    <div class="album-description">
+                        <?= nl2br(htmlspecialchars($album['description'])) ?>
+                    </div>
+                <?php endif; ?>
+                
+                <!-- Album Streaming Links -->
+                <?php if (!empty($album_streaming_links)): ?>
+                    <div class="album-streaming-links">
+                        <?php foreach ($album_streaming_links as $link): ?>
+                            <a href="<?= htmlspecialchars($link['url']) ?>" 
+                               target="_blank" 
+                               class="album-streaming-btn"
+                               onclick="logStreamingClick(<?= $album['id'] ?>, '<?= $link['platform'] ?>', 'album')">
+                                <span><?= getPlatformIcon($link['platform']) ?></span>
+                                <span>Listen on <?= ucwords(str_replace('-', ' ', $link['platform'])) ?></span>
                             </a>
                         <?php endforeach; ?>
                     </div>
-                </div>
-            <?php endif; ?>
-
-            <!-- Embedded player container -->
-            <div id="embedContainer" style="margin-bottom:40px;">
-                <?php if ($initialEmbed): ?>
-                    <?= $initialEmbed ?>
                 <?php endif; ?>
             </div>
-
-            <!-- Track listing -->
-            <?php if (!empty($tracks)): ?>
-                <div class="track-list">
-                    <h3 style="margin-bottom:15px;">Track List</h3>
-                    <ol style="list-style:none; padding-left:0;">
-                        <?php foreach ($tracks as $track): ?>
-                            <li style="padding:10px 0; border-bottom:1px solid rgba(255,255,255,0.1); display:flex; justify-content:space-between;">
-                                <div>
-                                    <strong><?= htmlspecialchars($track['track_number']) ?>.</strong> <?= htmlspecialchars($track['title']) ?>
-                                </div>
-                                <?php if (!empty($track['duration'])): ?>
-                                    <span style="color:rgba(255,255,255,0.7); font-size:0.9rem;"><?= htmlspecialchars($track['duration']) ?></span>
-                                <?php endif; ?>
-                            </li>
-                        <?php endforeach; ?>
-                    </ol>
-                </div>
-            <?php else: ?>
-                <p>No tracks found for this album.</p>
-            <?php endif; ?>
         </div>
     </section>
 
-    <!-- Simple footer -->
-    <footer style="padding:40px 20px; border-top:1px solid rgba(255,255,255,0.1);">
-        <div class="container" style="max-width:800px; margin:0 auto; text-align:center; color:rgba(255,255,255,0.6);">
-            <p style="margin-bottom:10px;">© <?= date('Y') ?> <?= htmlspecialchars($artistName) ?>. All rights reserved.</p>
-            <div style="display:flex; justify-content:center; gap:20px;">
-                <?php foreach ($socialLinks as $platform => $url): ?>
-                    <?php if ($url): ?>
-                        <a href="<?= htmlspecialchars($url) ?>" target="_blank" style="color:rgba(255,255,255,0.6); text-decoration:none;"><?= getSocialIcon($platform) ?> <?= ucfirst($platform) ?></a>
-                    <?php endif; ?>
-                <?php endforeach; ?>
+    <!-- Tracks Section -->
+    <?php if (!empty($tracks)): ?>
+        <section class="tracks-section">
+            <div class="tracks-container">
+                <div class="tracks-header">
+                    <h2>Track List</h2>
+                    <button class="play-all-btn" onclick="playAlbum(<?= $album['id'] ?>)">
+                        ▶️ Play Album
+                    </button>
+                </div>
+                
+                <div class="tracks-list">
+                    <?php foreach ($tracks as $track): ?>
+                        <div class="track-item" data-track-id="<?= $track['id'] ?>">
+                            <div class="track-number">
+                                <?= $track['track_number'] ?>
+                            </div>
+                            
+                            <div class="track-info">
+                                <h3><?= htmlspecialchars($track['title']) ?></h3>
+                                <?php if ($track['play_type'] === 'clip'): ?>
+                                    <small style="color: rgba(255,255,255,0.5);">
+                                        Preview: <?= $track['preview_duration'] ?>s starting at <?= $track['preview_start_time'] ?>s
+                                    </small>
+                                <?php endif; ?>
+                            </div>
+                            
+                            <?php if ($track['duration']): ?>
+                                <div class="track-duration">
+                                    <?= htmlspecialchars($track['duration']) ?>
+                                </div>
+                            <?php endif; ?>
+                            
+                            <div class="track-streaming-links">
+                                <?php 
+                                // Show track-specific links if available, otherwise fall back to album links
+                                $track_links = $track_streaming_links[$track['id']] ?? [];
+                                
+                                if (!empty($track_links)) {
+                                    // Use track-specific links
+                                    foreach ($track_links as $platform => $url): ?>
+                                        <a href="<?= htmlspecialchars($url) ?>" 
+                                           target="_blank" 
+                                           class="track-streaming-link"
+                                           title="Listen on <?= ucwords(str_replace('-', ' ', $platform)) ?>"
+                                           onclick="logStreamingClick(<?= $album['id'] ?>, '<?= $platform ?>', 'track', <?= $track['id'] ?>)">
+                                            <?= getPlatformIcon($platform) ?>
+                                        </a>
+                                    <?php endforeach;
+                                } else {
+                                    // Fall back to album links
+                                    foreach ($album_streaming_links as $link): ?>
+                                        <a href="<?= htmlspecialchars($link['url']) ?>" 
+                                           target="_blank" 
+                                           class="track-streaming-link"
+                                           title="Listen on <?= ucwords(str_replace('-', ' ', $link['platform'])) ?>"
+                                           onclick="logStreamingClick(<?= $album['id'] ?>, '<?= $link['platform'] ?>', 'album')">
+                                            <?= getPlatformIcon($link['platform']) ?>
+                                        </a>
+                                    <?php endforeach;
+                                }
+                                ?>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+        </section>
+    <?php endif; ?>
+
+    <!-- Footer Player (same as homepage) -->
+    <section id="nowPlaying" class="now-playing-bar" style="transform: translateY(100%);">
+        <div class="now-playing-content">
+            <div class="now-playing-left">
+                <img id="npCover" src="<?= $album['cover_image'] ? '/' . ltrim($album['cover_image'], '/') : '/assets/default-cover.jpg' ?>" alt="Now Playing">
+                <div class="now-playing-info">
+                    <h4 id="npTitle"><?= htmlspecialchars($album['title']) ?></h4>
+                    <p id="npArtist"><?= htmlspecialchars($artistName) ?></p>
+                </div>
+            </div>
+            
+            <div class="now-playing-center">
+                <div class="player-controls">
+                    <button onclick="previousTrack()">⏮️</button>
+                    <button id="mainPlayPause" class="play-main">▶️</button>
+                    <button onclick="nextTrack()">⏭️</button>
+                </div>
+                
+                <div class="progress-container">
+                    <span class="time-current">0:00</span>
+                    <div class="progress-bar">
+                        <div class="progress-fill"></div>
+                    </div>
+                    <span class="time-total">0:00</span>
+                </div>
+            </div>
+            
+            <div class="now-playing-right">
+                <button id="npClose" title="Close player">✕</button>
             </div>
         </div>
-    </footer>
+        
+        <div id="embedContainer">
+            <!-- Spotify/YouTube embeds will load here -->
+        </div>
+    </section>
 
-    <!-- Load main script for navigation and search behaviour -->
-    <script src="/js/script.js"></script>
+    <!-- Footer (same as homepage) -->
+    <section class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div style="text-align: center;">
+                    <h3 style="color: #e94560; margin-bottom: 20px;">
+                        <?= htmlspecialchars($artistName) ?>
+                    </h3>
+                    
+                    <p style="color: rgba(255,255,255,0.7); margin-bottom: 30px;">
+                        © <?= date('Y') ?> <?= htmlspecialchars($artistName) ?>. All rights reserved.
+                    </p>
+                    
+                    <div style="display: flex; justify-content: center; gap: 20px; margin-bottom: 20px;">
+                        <?php foreach($socialLinks as $platform => $url): ?>
+                            <?php if($url): ?>
+                                <a href="<?= htmlspecialchars($url) ?>" target="_blank" 
+                                   style="color: rgba(255,255,255,0.6); text-decoration: none; transition: color 0.3s ease;" 
+                                   onmouseover="this.style.color='#e94560'" onmouseout="this.style.color='rgba(255,255,255,0.6)'">
+                                    <?= getSocialIcon($platform) ?> <?= ucfirst($platform) ?>
+                                </a>
+                            <?php endif; ?>
+                        <?php endforeach; ?>
+                    </div>
+                    
+                    <p style="color: rgba(255,255,255,0.4); font-size: 0.9rem;">
+                        🎵 Made with passion for music lovers everywhere
+                    </p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Scripts -->
     <script>
-    // When clicking a platform link on this page, load its embed into the
-    // embedContainer if an embed code is available; otherwise open the
-    // link in a new tab.  We attach the listener after the page has
-    // loaded to ensure the elements exist.
-    document.addEventListener('DOMContentLoaded', () => {
-        document.querySelectorAll('.platform-link').forEach(link => {
-            link.addEventListener('click', function(e) {
-                const embed = this.dataset.embed;
-                const embedContainer = document.getElementById('embedContainer');
-                if (embed && embed.trim() !== '') {
-                    e.preventDefault();
-                    embedContainer.innerHTML = embed;
-                    // Scroll to the embed container for convenience
-                    embedContainer.scrollIntoView({behavior:'smooth', block:'center'});
-                }
-            });
+        // Log streaming clicks for analytics
+        function logStreamingClick(albumId, platform, linkType = 'album', trackId = null) {
+            fetch('/api/log-click.php', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    album_id: albumId,
+                    track_id: trackId,
+                    platform: platform,
+                    link_type: linkType,
+                    timestamp: new Date().toISOString()
+                })
+            }).catch(e => console.log('Analytics logging failed:', e));
+        }
+
+        // Play album functionality
+        function playAlbum(albumId) {
+            const footerPlayer = document.getElementById('nowPlaying');
+            footerPlayer.style.transform = 'translateY(0)';
+            
+            // Try to find Spotify embed from album links
+            fetch(`/api/get-streaming-links.php?album_id=${albumId}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success && data.links.length > 0) {
+                        const spotifyLink = data.links.find(link => link.platform === 'spotify' && link.embed_code);
+                        if (spotifyLink && spotifyLink.embed_code) {
+                            document.getElementById('embedContainer').innerHTML = spotifyLink.embed_code;
+                        }
+                    }
+                })
+                .catch(e => console.log('Failed to load streaming links:', e));
+        }
+
+        // Placeholder functions
+        function previousTrack() { console.log('Previous track'); }
+        function nextTrack() { console.log('Next track'); }
+
+        // Close player
+        document.getElementById('npClose').addEventListener('click', function() {
+            document.getElementById('nowPlaying').style.transform = 'translateY(100%)';
         });
-    });
     </script>
 </body>
 </html>

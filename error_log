@@ -11,3 +11,24 @@ Stack trace:
 #0 /home/aurioni1/public_html/pages-debug.php(141): include()
 #1 {main}
   thrown in /home/aurioni1/public_html/admin/login.php on line 8
+[20-Aug-2025 22:14:16 UTC] PHP Parse error:  syntax error, unexpected token ")", expecting variable in /home/aurioni1/public_html/index.php on line 607
+[20-Aug-2025 22:34:52 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[42S02]: Base table or view not found: 1146 Table 'aurioni1_aurionix.album_streaming_links' doesn't exist in /home/aurioni1/public_html/index.php:26
+Stack trace:
+#0 /home/aurioni1/public_html/index.php(26): PDOStatement->execute()
+#1 {main}
+  thrown in /home/aurioni1/public_html/index.php on line 26
+[20-Aug-2025 22:39:00 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[42S02]: Base table or view not found: 1146 Table 'aurioni1_aurionix.album_streaming_links' doesn't exist in /home/aurioni1/public_html/index.php:26
+Stack trace:
+#0 /home/aurioni1/public_html/index.php(26): PDOStatement->execute()
+#1 {main}
+  thrown in /home/aurioni1/public_html/index.php on line 26
+[20-Aug-2025 22:39:02 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[42S02]: Base table or view not found: 1146 Table 'aurioni1_aurionix.album_streaming_links' doesn't exist in /home/aurioni1/public_html/index.php:26
+Stack trace:
+#0 /home/aurioni1/public_html/index.php(26): PDOStatement->execute()
+#1 {main}
+  thrown in /home/aurioni1/public_html/index.php on line 26
+[20-Aug-2025 22:39:38 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[42S02]: Base table or view not found: 1146 Table 'aurioni1_aurionix.album_streaming_links' doesn't exist in /home/aurioni1/public_html/index.php:26
+Stack trace:
+#0 /home/aurioni1/public_html/index.php(26): PDOStatement->execute()
+#1 {main}
+  thrown in /home/aurioni1/public_html/index.php on line 26

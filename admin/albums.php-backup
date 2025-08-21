@@ -8,8 +8,8 @@ require_once '../config.php';
 requireAdmin();
 
 // Initialize variables
-$action = $_POST['action'] ?? ($_GET['action'] ?? 'list');
-$album_id = $_POST['album_id'] ?? ($_GET['album_id'] ?? '');
+$action = $_GET['action'] ?? 'list';
+$album_id = $_GET['album_id'] ?? '';
 $message = '';
 $error = '';
 

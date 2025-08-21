@@ -1,8 +1,7 @@
 <?php
 /**
- * ADMIN SIDEBAR NAVIGATION
- * Create folder: admin/includes/
- * Place this file as: admin/includes/sidebar.php
+ * UPDATED ADMIN SIDEBAR NAVIGATION (No Tracks Menu)
+ * Replace: admin/includes/sidebar.php
  */
 
 $current_page = basename($_SERVER['PHP_SELF'], '.php');
@@ -33,20 +32,17 @@ $current_page = basename($_SERVER['PHP_SELF'], '.php');
             <li class="nav-item">
                 <a href="albums.php" class="nav-link <?= $current_page === 'albums' ? 'active' : '' ?>">
                     <span class="nav-icon">🎵</span>
-                    <span class="nav-text">Albums</span>
+                    <span class="nav-text">Albums & Tracks</span>
                     <span class="nav-badge" id="albumsCount">
                         <?php
-                        $stmt = $pdo->query("SELECT COUNT(*) as count FROM albums");
-                        echo $stmt->fetch()['count'];
+                        try {
+                            $stmt = $pdo->query("SELECT COUNT(*) as count FROM albums");
+                            echo $stmt->fetch()['count'];
+                        } catch (Exception $e) {
+                            echo '0';
+                        }
                         ?>
                     </span>
-                </a>
-            </li>
-            
-            <li class="nav-item">
-                <a href="tracks.php" class="nav-link <?= $current_page === 'tracks' ? 'active' : '' ?>">
-                    <span class="nav-icon">🎼</span>
-                    <span class="nav-text">Tracks</span>
                 </a>
             </li>
             
@@ -57,7 +53,7 @@ $current_page = basename($_SERVER['PHP_SELF'], '.php');
                 </a>
             </li>
             
-                        <li class="nav-item">
+            <li class="nav-item">
                 <a href="analytics.php" class="nav-link <?= $current_page === 'analytics' ? 'active' : '' ?>">
                     <span class="nav-icon">📈</span>
                     <span class="nav-text">Analytics</span>
@@ -79,6 +75,13 @@ $current_page = basename($_SERVER['PHP_SELF'], '.php');
                 <a href="users.php" class="nav-link <?= $current_page === 'users' ? 'active' : '' ?>">
                     <span class="nav-icon">👥</span>
                     <span class="nav-text">Users</span>
+                </a>
+            </li>
+            
+            <li class="nav-item">
+                <a href="media.php" class="nav-link <?= $current_page === 'media' ? 'active' : '' ?>">
+                    <span class="nav-icon">📁</span>
+                    <span class="nav-text">Media Files</span>
                 </a>
             </li>
         </ul>
@@ -155,94 +158,96 @@ $current_page = basename($_SERVER['PHP_SELF'], '.php');
     background: none;
     border: none;
     cursor: pointer;
-    gap: 4px;
+    padding: 5px;
 }
 
 .sidebar-toggle span {
     width: 20px;
     height: 2px;
-    background: rgba(255,255,255,0.6);
+    background: white;
+    margin: 2px 0;
     transition: 0.3s;
 }
 
 .sidebar-nav {
     flex: 1;
-    overflow-y: auto;
     padding: 20px 0;
+    overflow-y: auto;
 }
 
 .nav-list {
     list-style: none;
-    margin: 0;
     padding: 0;
+    margin: 0;
 }
 
 .nav-item {
-    margin-bottom: 5px;
+    margin-bottom: 8px;
+    padding: 0 20px;
 }
 
 .nav-link {
     display: flex;
     align-items: center;
-    padding: 12px 25px;
+    gap: 15px;
+    padding: 12px 20px;
     color: rgba(255,255,255,0.7);
     text-decoration: none;
+    border-radius: 12px;
     transition: all 0.3s ease;
     position: relative;
-    font-weight: 500;
 }
 
 .nav-link:hover {
-    color: white;
     background: rgba(255,255,255,0.05);
+    color: white;
 }
 
 .nav-link.active {
-    color: #e94560;
-    background: rgba(233, 69, 96, 0.1);
-}
-
-.nav-link.active::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    width: 3px;
     background: linear-gradient(135deg, #e94560, #f27121);
+    color: white;
+    box-shadow: 0 5px 15px rgba(233, 69, 96, 0.3);
 }
 
 .nav-icon {
     font-size: 1.2rem;
-    margin-right: 12px;
-    width: 20px;
+    width: 24px;
     text-align: center;
 }
 
 .nav-text {
-    flex: 1;
+    font-weight: 500;
 }
 
 .nav-badge {
-    background: #e94560;
+    background: rgba(255,255,255,0.2);
     color: white;
-    font-size: 0.75rem;
+    font-size: 0.7rem;
     padding: 2px 8px;
     border-radius: 10px;
+    margin-left: auto;
     font-weight: 600;
 }
 
+.nav-link.active .nav-badge {
+    background: rgba(255,255,255,0.3);
+}
+
 .nav-separator {
-    padding: 20px 25px 10px;
+    margin: 20px 0 10px 0;
+    padding: 0 40px;
+}
+
+.nav-separator span {
     color: rgba(255,255,255,0.4);
     font-size: 0.8rem;
-    text-transform: uppercase;
     font-weight: 600;
+    text-transform: uppercase;
     letter-spacing: 1px;
 }
 
 .sidebar-footer {
-    padding: 25px;
+    padding: 20px;
     border-top: 1px solid rgba(255,255,255,0.1);
 }
 
@@ -267,11 +272,11 @@ $current_page = basename($_SERVER['PHP_SELF'], '.php');
 }
 
 .user-details {
-    flex: 1;
+    display: flex;
+    flex-direction: column;
 }
 
 .user-name {
-    display: block;
     color: white;
     font-weight: 600;
     font-size: 0.9rem;
@@ -279,25 +284,25 @@ $current_page = basename($_SERVER['PHP_SELF'], '.php');
 }
 
 .user-role {
-    display: block;
-    color: rgba(255,255,255,0.5);
-    font-size: 0.8rem;
+    color: rgba(255,255,255,0.6);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
 }
 
 .footer-actions {
     display: flex;
-    gap: 10px;
-    justify-content: center;
+    gap: 8px;
 }
 
 .footer-btn {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 35px;
-    height: 35px;
-    border-radius: 8px;
+    width: 36px;
+    height: 36px;
     background: rgba(255,255,255,0.1);
+    border-radius: 8px;
     color: rgba(255,255,255,0.7);
     text-decoration: none;
     transition: all 0.3s ease;
@@ -305,17 +310,16 @@ $current_page = basename($_SERVER['PHP_SELF'], '.php');
 }
 
 .footer-btn:hover {
-    background: #e94560;
+    background: rgba(255,255,255,0.2);
     color: white;
-    transform: translateY(-2px);
 }
 
 .sidebar-overlay {
     position: fixed;
     top: 0;
     left: 0;
-    right: 0;
-    bottom: 0;
+    width: 100%;
+    height: 100%;
     background: rgba(0,0,0,0.5);
     z-index: 999;
     display: none;
