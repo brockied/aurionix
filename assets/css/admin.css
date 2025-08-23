@@ -1,0 +1,95 @@
+/* Admin-specific styles to modernise the backend interface */
+
+body {
+  background-color: var(--colour-bg);
+  color: var(--colour-text);
+}
+
+.admin-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  background-color: var(--colour-bg-dark);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 1rem;
+  height: var(--navbar-height);
+  z-index: 1000;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+}
+.admin-header .nav-links ul {
+  list-style: none;
+  display: flex;
+  gap: 1rem;
+  margin: 0;
+  padding: 0;
+}
+.admin-header .nav-links a {
+  color: var(--colour-text);
+  text-decoration: none;
+  padding: 0.5rem 0.75rem;
+  border-radius: 4px;
+  transition: background-color var(--transition-speed), color var(--transition-speed);
+}
+.admin-header .nav-links a:hover,
+.admin-header .nav-links a.active {
+  background-color: var(--colour-card);
+  color: var(--colour-secondary);
+}
+
+.admin-container {
+  padding-top: calc(var(--navbar-height) + 1rem);
+  width: var(--container-width);
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
+/* Stats cards */
+.stats-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+.stats-card {
+  flex: 1;
+  min-width: 200px;
+  background-color: var(--colour-card);
+  border-radius: 8px;
+  padding: 1rem;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+.stats-card h3 {
+  margin: 0 0 0.5rem;
+  color: var(--colour-secondary);
+  font-weight: 600;
+}
+.stats-card p {
+  font-size: 2rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+/* Admin tables */
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+}
+.admin-table th,
+.admin-table td {
+  padding: 0.75rem 0.5rem;
+  text-align: left;
+}
+.admin-table th {
+  background-color: var(--colour-card);
+  color: var(--colour-secondary);
+  font-weight: 600;
+}
+.admin-table tr:nth-child(even) {
+  background-color: rgba(255,255,255,0.03);
+}
+.admin-table tr:hover {
+  background-color: rgba(255,255,255,0.05);
+}
